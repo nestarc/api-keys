@@ -1,10 +1,19 @@
+import { ApiKeyErrorCode } from '../../src/errors';
 import { ApiKeysService } from '../../src/api-keys.service';
 import { Sha256Hasher } from '../../src/hasher';
+import type { ApiKeyStorage } from '../../src/storage/api-key-storage.interface';
 import { InMemoryApiKeyStorage } from '../../src/storage/in-memory-storage';
 
-function svc() {
+function svc(
+  overrides: Partial<{
+    hasher: Sha256Hasher;
+    onAuthFailed: (prefix: string | null, code: string) => void;
+  }> = {},
+) {
   const storage = new InMemoryApiKeyStorage();
-  const hasher = new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 });
+  const hasher =
+    overrides.hasher ??
+    new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 });
   const service = new ApiKeysService({
     storage,
     hasher,
@@ -15,6 +24,7 @@ function svc() {
     })(),
     clock: () => new Date('2026-01-01T00:00:00Z'),
     debounceMs: 60_000,
+    onAuthFailed: overrides.onAuthFailed,
   });
 
   return { service, storage };
@@ -70,6 +80,40 @@ describe('ApiKeysService.create', () => {
     await expect(service.create({ tenantId: 't1', name: 'x', scopes: [] })).rejects.toThrow(
       /at least one scope/,
     );
+  });
+
+  it('retries when storage reports a duplicate prefix', async () => {
+    const insert = jest
+      .fn<ReturnType<ApiKeyStorage['insert']>, Parameters<ApiKeyStorage['insert']>>()
+      .mockRejectedValueOnce(new Error('duplicate prefix: abcdefghijkl'))
+      .mockResolvedValue(undefined);
+    const storage: ApiKeyStorage = {
+      insert,
+      findByPrefix: jest.fn().mockResolvedValue(null),
+      listByTenant: jest.fn().mockResolvedValue([]),
+      markRevoked: jest.fn().mockResolvedValue(undefined),
+      touchLastUsed: jest.fn().mockResolvedValue(undefined),
+    };
+    const hasher = new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 });
+    const service = new ApiKeysService({
+      storage,
+      hasher,
+      namespace: 'nk',
+      idFactory: (() => {
+        let counter = 0;
+        return () => `key_${++counter}`;
+      })(),
+      clock: () => new Date('2026-01-01T00:00:00Z'),
+    });
+
+    const result = await service.create({
+      tenantId: 't1',
+      name: 'retry-me',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+
+    expect(insert).toHaveBeenCalledTimes(2);
+    expect(result.key).toMatch(/^nk_live_[A-Za-z0-9]{12}_[A-Za-z0-9]{32}$/);
   });
 });
 
@@ -147,6 +191,68 @@ describe('ApiKeysService.verify', () => {
     await expect(service.verify(created.key)).rejects.toMatchObject({
       code: 'api_key_expired',
     });
+  });
+
+  it('maps unknown pepper versions to api_key_invalid and reports auth failure', async () => {
+    const onAuthFailed = jest.fn();
+    const { service, storage } = svc({
+      hasher: new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 }),
+      onAuthFailed,
+    });
+
+    const created = await service.create({
+      tenantId: 't1',
+      name: 'x',
+      scopes: [{ resource: 'r', level: 'read' }],
+    });
+
+    const [record] = await storage.listByTenant('t1');
+    record.pepperVersion = 99;
+
+    const internalRecords = storage as unknown as {
+      records: Map<string, typeof record>;
+    };
+    internalRecords.records.set(record.id, record);
+
+    await expect(service.verify(created.key)).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Invalid,
+    });
+    expect(onAuthFailed).toHaveBeenCalledWith(record.prefix, ApiKeyErrorCode.Invalid);
+  });
+
+  it('returns context even when lastUsedAt tracking fails in the background', async () => {
+    class TouchFailingStorage extends InMemoryApiKeyStorage {
+      override async touchLastUsed(): Promise<void> {
+        throw new Error('touch failed');
+      }
+    }
+
+    const storage = new TouchFailingStorage();
+    const hasher = new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 });
+    const service = new ApiKeysService({
+      storage,
+      hasher,
+      namespace: 'nk',
+      idFactory: (() => {
+        let counter = 0;
+        return () => `key_${++counter}`;
+      })(),
+      clock: () => new Date('2026-01-01T00:00:00Z'),
+    });
+
+    const created = await service.create({
+      tenantId: 't1',
+      name: 'x',
+      scopes: [{ resource: 'r', level: 'read' }],
+    });
+
+    await expect(service.verify(created.key)).resolves.toMatchObject({
+      tenantId: 't1',
+      environment: 'live',
+      scopes: ['r:read'],
+    });
+
+    await Promise.resolve();
   });
 });
 

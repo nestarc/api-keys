@@ -31,6 +31,8 @@ export class AppModule {}
 
 Add the schema model from `prisma/schema.example.prisma` into your own `schema.prisma` and run a migration.
 
+Use a product-specific `namespace` such as `acme` or `billing` instead of relying on the default `nk`. That keeps your keys distinct if multiple packages or services generate API keys in the same ecosystem.
+
 ### Protect a route
 
 ```typescript
@@ -63,6 +65,18 @@ const { id, key } = await apiKeys.create({
 
 ```text
 nk_live_<12-char-prefix>_<32-char-secret>
+```
+
+## Logging
+
+Never log raw API keys. The package exports `API_KEY_REDACT_REGEX` so you can redact them before request or error logs are written.
+
+```typescript
+import { API_KEY_REDACT_REGEX } from '@nestarc/api-keys';
+
+export function redactApiKeys(value: string): string {
+  return value.replace(API_KEY_REDACT_REGEX, '[REDACTED_API_KEY]');
+}
 ```
 
 ## Docs

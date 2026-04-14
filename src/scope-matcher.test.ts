@@ -13,6 +13,16 @@ describe('flattenScopes', () => {
   it('rejects empty scope arrays', () => {
     expect(() => flattenScopes([])).toThrow(/at least one scope/);
   });
+
+  it('deduplicates identical scopes', () => {
+    expect(
+      flattenScopes([
+        { resource: 'invoices', level: 'read' },
+        { resource: 'invoices', level: 'read' },
+        { resource: 'reports', level: 'write' },
+      ]),
+    ).toEqual(['invoices:read', 'reports:write']);
+  });
 });
 
 describe('scopeSatisfies', () => {

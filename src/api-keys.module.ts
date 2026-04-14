@@ -18,6 +18,7 @@ export interface ApiKeysModuleOptions {
 @Module({})
 export class ApiKeysModule {
   static forRoot(options: ApiKeysModuleOptions): DynamicModule {
+    const currentPepperVersion = resolveCurrentPepperVersion(options);
     const providers: Provider[] = [
       { provide: API_KEYS_OPTIONS, useValue: options },
       { provide: API_KEYS_STORAGE, useValue: options.storage },
@@ -28,9 +29,7 @@ export class ApiKeysModule {
             storage: options.storage,
             hasher: new Sha256Hasher({
               peppers: options.peppers,
-              currentVersion:
-                options.currentPepperVersion ??
-                Math.max(...Object.keys(options.peppers).map(Number)),
+              currentVersion: currentPepperVersion,
             }),
             namespace: options.namespace ?? 'nk',
             debounceMs: options.debounceMs,
@@ -46,4 +45,18 @@ export class ApiKeysModule {
       global: true,
     };
   }
+}
+
+function resolveCurrentPepperVersion(options: ApiKeysModuleOptions): number {
+  const configuredVersions = Object.keys(options.peppers).map(Number).filter(Number.isFinite);
+  if (configuredVersions.length === 0) {
+    throw new Error('ApiKeysModule requires at least one pepper');
+  }
+
+  const currentPepperVersion = options.currentPepperVersion ?? Math.max(...configuredVersions);
+  if (!options.peppers[currentPepperVersion]) {
+    throw new Error(`ApiKeysModule current pepper version ${currentPepperVersion} is not configured`);
+  }
+
+  return currentPepperVersion;
 }

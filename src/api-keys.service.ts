@@ -22,6 +22,8 @@ export interface ApiKeysServiceDeps {
 }
 
 export class ApiKeysService {
+  private static readonly CREATE_MAX_ATTEMPTS = 3;
+
   private readonly storage: ApiKeyStorage;
   private readonly hasher: Sha256Hasher;
   private readonly namespace: string;
@@ -43,31 +45,43 @@ export class ApiKeysService {
   async create(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
     const environment = input.environment ?? 'live';
     const scopes = flattenScopes(input.scopes);
-    const generatedKey = generateKey({ namespace: this.namespace, environment });
-    const hashed = this.hasher.hash(generatedKey.secret);
+    for (let attempt = 0; attempt < ApiKeysService.CREATE_MAX_ATTEMPTS; attempt += 1) {
+      const generatedKey = generateKey({ namespace: this.namespace, environment });
+      const hashed = this.hasher.hash(generatedKey.secret);
 
-    const record: ApiKeyRecord = {
-      id: this.idFactory(),
-      tenantId: input.tenantId,
-      name: input.name,
-      environment,
-      prefix: generatedKey.prefix,
-      hash: hashed.hash,
-      pepperVersion: hashed.pepperVersion,
-      scopes,
-      lastUsedAt: null,
-      expiresAt: input.expiresAt ?? null,
-      revokedAt: null,
-      createdBy: input.createdBy ?? null,
-      createdAt: this.clock(),
-    };
+      const record: ApiKeyRecord = {
+        id: this.idFactory(),
+        tenantId: input.tenantId,
+        name: input.name,
+        environment,
+        prefix: generatedKey.prefix,
+        hash: hashed.hash,
+        pepperVersion: hashed.pepperVersion,
+        scopes,
+        lastUsedAt: null,
+        expiresAt: input.expiresAt ?? null,
+        revokedAt: null,
+        createdBy: input.createdBy ?? null,
+        createdAt: this.clock(),
+      };
 
-    await this.storage.insert(record);
+      try {
+        await this.storage.insert(record);
+      } catch (error) {
+        if (isDuplicatePrefixError(error) && attempt < ApiKeysService.CREATE_MAX_ATTEMPTS - 1) {
+          continue;
+        }
 
-    return {
-      id: record.id,
-      key: generatedKey.raw,
-    };
+        throw error;
+      }
+
+      return {
+        id: record.id,
+        key: generatedKey.raw,
+      };
+    }
+
+    throw new Error('failed to generate a unique API key prefix');
   }
 
   async verify(rawKey: string): Promise<ApiKeyContext> {
@@ -103,12 +117,22 @@ export class ApiKeysService {
       throw new ApiKeyError(ApiKeyErrorCode.Expired);
     }
 
-    const matches = this.hasher.verify(parsedKey.secret, record.hash, record.pepperVersion);
+    let matches: boolean;
+    try {
+      matches = this.hasher.verify(parsedKey.secret, record.hash, record.pepperVersion);
+    } catch {
+      this.onAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid);
+      throw new ApiKeyError(ApiKeyErrorCode.Invalid);
+    }
+
     if (!matches) {
       this.onAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid);
       throw new ApiKeyError(ApiKeyErrorCode.Invalid);
     }
 
+    // Usage tracking is intentionally best-effort. A concurrent revoke may still win
+    // after this verification and leave a later lastUsedAt update behind, which is
+    // acceptable because it is telemetry and must not block successful auth.
     void this.scheduleTouch(record);
 
     return {
@@ -142,4 +166,25 @@ export class ApiKeysService {
       // Best-effort usage tracking should not break authentication.
     }
   }
+}
+
+function isDuplicatePrefixError(error: unknown): boolean {
+  if (error instanceof Error && error.message.toLowerCase().includes('duplicate prefix')) {
+    return true;
+  }
+
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const prismaLikeError = error as {
+    code?: unknown;
+    meta?: { target?: unknown };
+  };
+  if (prismaLikeError.code !== 'P2002') {
+    return false;
+  }
+
+  const target = prismaLikeError.meta?.target;
+  return Array.isArray(target) && target.includes('prefix');
 }

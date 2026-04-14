@@ -5,7 +5,7 @@ export function flattenScopes(scopes: Scope[]): string[] {
     throw new Error('at least one scope is required');
   }
 
-  return scopes.map((scope) => `${scope.resource}:${scope.level}`);
+  return Array.from(new Set(scopes.map((scope) => `${scope.resource}:${scope.level}`)));
 }
 
 export function scopeSatisfies(

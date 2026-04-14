@@ -25,5 +25,5 @@ model ApiKey {
   createdAt     DateTime @default(now())
 
   @@index([tenantId, environment])
-  @@index([prefix])
+  @@index([tenantId, revokedAt])
 }
