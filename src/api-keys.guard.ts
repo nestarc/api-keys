@@ -8,7 +8,7 @@ import {
 } from './decorators/require-scope.decorator';
 import { ApiKeyError, ApiKeyErrorCode } from './errors';
 import { scopeSatisfies } from './scope-matcher';
-import type { ApiKeyContext, Environment } from './types';
+import type { Environment } from './types';
 
 export const API_KEY_CONTEXT_PROPERTY = 'apiKey';
 
