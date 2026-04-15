@@ -10,6 +10,8 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.0] - 2026-04-15
+
 ### Added
 
 - Initial `ApiKeysModule.forRoot()` for NestJS with tenant-scoped API keys.
