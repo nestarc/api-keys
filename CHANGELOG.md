@@ -10,6 +10,12 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-04-15
+
+Initial public release. Supersedes the deprecated `0.1.0-alpha.0` prerelease,
+which was published from an out-of-date `package.json` version field; no code
+or behavior differences exist between the two.
+
 ## [0.1.0-alpha.0] - 2026-04-15
 
 ### Added

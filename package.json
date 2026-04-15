@@ -1,6 +1,6 @@
 {
   "name": "@nestarc/api-keys",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0",
   "description": "Secure, tenant-scoped API keys for NestJS + Prisma. SHA-256 hashed, Stripe-style scopes, and test/live environments.",
   "license": "MIT",
   "author": "nestarc",
