@@ -31,3 +31,21 @@ export class ApiKeyError extends Error {
     this.httpStatus = HTTP_STATUS[code];
   }
 }
+
+export const ApiKeyOperationErrorCode = {
+  NotFound: 'api_key_record_not_found',
+  NotRotatable: 'api_key_not_rotatable',
+} as const;
+
+export type ApiKeyOperationErrorCode =
+  (typeof ApiKeyOperationErrorCode)[keyof typeof ApiKeyOperationErrorCode];
+
+export class ApiKeyOperationError extends Error {
+  readonly code: ApiKeyOperationErrorCode;
+
+  constructor(code: ApiKeyOperationErrorCode, reason?: string) {
+    super(reason ? `${code}: ${reason}` : code);
+    this.name = 'ApiKeyOperationError';
+    this.code = code;
+  }
+}

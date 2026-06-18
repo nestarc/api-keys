@@ -10,6 +10,31 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-18
+
+### Added
+
+- `ApiKeysService.rotate()` for zero-downtime API key replacement with configurable grace periods.
+- Rotation metadata on records: `rotatedAt` and `replacedByKeyId`.
+- Lifecycle event hook API via `onEvent`, with `api_key.created`, `api_key.revoked`,
+  `api_key.rotated`, `api_key.auth_failed`, and opt-in `api_key.used` events.
+- TTL policy options: `defaultExpiresInMs`, `maxExpiresInMs`, and `allowNeverExpires`.
+- Stable request context helpers: `@CurrentApiKey()`, `getApiKeyContext()`,
+  `API_KEY_CONTEXT_PROPERTY`, and `contextWriter`.
+- `prefix` on `ApiKeyContext` for safe structured logging and tenancy/audit bridges.
+- Storage contract methods for rotation-capable adapters: `findById()` and `rotate()`.
+
+### Changed
+
+- Prisma schema example now includes rotation metadata and a `replacedByKeyId` index.
+- Documentation now separates pepper rotation from user API key rotation and aligns v0.1
+  claims with shipped behavior.
+
+### Security
+
+- Lifecycle event payloads intentionally exclude raw API keys, hashes, and pepper values.
+- User key rotation preserves the "raw key returned once" invariant for replacement keys.
+
 ## [0.1.0] - 2026-04-15
 
 Initial public release. Supersedes the deprecated `0.1.0-alpha.0` prerelease,

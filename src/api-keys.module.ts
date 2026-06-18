@@ -1,7 +1,13 @@
 import { DynamicModule, Module, Provider } from '@nestjs/common';
+import { ApiKeysGuard } from './api-keys.guard';
 import { ApiKeysService, ApiKeysServiceDeps } from './api-keys.service';
+import {
+  API_KEY_CONTEXT_WRITER,
+  ApiKeyContextWriter,
+} from './context';
 import { Sha256Hasher } from './hasher';
 import type { ApiKeyStorage } from './storage/api-key-storage.interface';
+import type { ApiKeyEventSink, ApiKeyTtlPolicy } from './types';
 
 export const API_KEYS_OPTIONS = Symbol('API_KEYS_OPTIONS');
 export const API_KEYS_STORAGE = Symbol('API_KEYS_STORAGE');
@@ -13,6 +19,11 @@ export interface ApiKeysModuleOptions {
   debounceMs?: number;
   storage: ApiKeyStorage;
   onAuthFailed?: ApiKeysServiceDeps['onAuthFailed'];
+  onEvent?: ApiKeyEventSink;
+  onEventError?: ApiKeysServiceDeps['onEventError'];
+  emitUsageEvents?: boolean;
+  ttlPolicy?: ApiKeyTtlPolicy;
+  contextWriter?: ApiKeyContextWriter;
 }
 
 @Module({})
@@ -22,6 +33,7 @@ export class ApiKeysModule {
     const providers: Provider[] = [
       { provide: API_KEYS_OPTIONS, useValue: options },
       { provide: API_KEYS_STORAGE, useValue: options.storage },
+      { provide: API_KEY_CONTEXT_WRITER, useValue: options.contextWriter },
       {
         provide: ApiKeysService,
         useFactory: () =>
@@ -34,14 +46,19 @@ export class ApiKeysModule {
             namespace: options.namespace ?? 'nk',
             debounceMs: options.debounceMs,
             onAuthFailed: options.onAuthFailed,
+            onEvent: options.onEvent,
+            onEventError: options.onEventError,
+            emitUsageEvents: options.emitUsageEvents,
+            ttlPolicy: options.ttlPolicy,
           }),
       },
+      ApiKeysGuard,
     ];
 
     return {
       module: ApiKeysModule,
       providers,
-      exports: [ApiKeysService],
+      exports: [ApiKeysService, ApiKeysGuard],
       global: true,
     };
   }

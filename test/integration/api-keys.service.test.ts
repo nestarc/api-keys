@@ -3,11 +3,33 @@ import { ApiKeysService } from '../../src/api-keys.service';
 import { Sha256Hasher } from '../../src/hasher';
 import type { ApiKeyStorage } from '../../src/storage/api-key-storage.interface';
 import { InMemoryApiKeyStorage } from '../../src/storage/in-memory-storage';
+import type { ApiKeyRecord } from '../../src/types';
+
+interface RotatableService extends ApiKeysService {
+  rotate(
+    id: string,
+    input?: {
+      gracePeriodMs?: number;
+      name?: string;
+      createdBy?: string;
+      expiresAt?: Date | null;
+    },
+  ): Promise<{ id: string; key: string; replacedKeyId: string; graceExpiresAt: Date }>;
+}
 
 function svc(
   overrides: Partial<{
     hasher: Sha256Hasher;
     onAuthFailed: (prefix: string | null, code: string) => void;
+    clock: () => Date;
+    onEvent: (event: Record<string, unknown>) => void | Promise<void>;
+    onEventError: (error: unknown, event: Record<string, unknown>) => void;
+    emitUsageEvents: boolean;
+    ttlPolicy: {
+      defaultExpiresInMs?: number;
+      maxExpiresInMs?: number;
+      allowNeverExpires?: boolean;
+    };
   }> = {},
 ) {
   const storage = new InMemoryApiKeyStorage();
@@ -22,10 +44,14 @@ function svc(
       let counter = 0;
       return () => `key_${++counter}`;
     })(),
-    clock: () => new Date('2026-01-01T00:00:00Z'),
+    clock: overrides.clock ?? (() => new Date('2026-01-01T00:00:00Z')),
     debounceMs: 60_000,
     onAuthFailed: overrides.onAuthFailed,
-  });
+    onEvent: overrides.onEvent,
+    onEventError: overrides.onEventError,
+    emitUsageEvents: overrides.emitUsageEvents,
+    ttlPolicy: overrides.ttlPolicy,
+  } as ConstructorParameters<typeof ApiKeysService>[0] & Record<string, unknown>);
 
   return { service, storage };
 }
@@ -89,10 +115,12 @@ describe('ApiKeysService.create', () => {
       .mockResolvedValue(undefined);
     const storage: ApiKeyStorage = {
       insert,
+      findById: jest.fn().mockResolvedValue(null),
       findByPrefix: jest.fn().mockResolvedValue(null),
       listByTenant: jest.fn().mockResolvedValue([]),
       markRevoked: jest.fn().mockResolvedValue(undefined),
       touchLastUsed: jest.fn().mockResolvedValue(undefined),
+      rotate: jest.fn().mockResolvedValue(undefined),
     };
     const hasher = new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 });
     const service = new ApiKeysService({
@@ -114,6 +142,341 @@ describe('ApiKeysService.create', () => {
 
     expect(insert).toHaveBeenCalledTimes(2);
     expect(result.key).toMatch(/^nk_live_[A-Za-z0-9]{12}_[A-Za-z0-9]{32}$/);
+  });
+});
+
+describe('ApiKeysService.rotate', () => {
+  it('creates a replacement key and keeps both keys valid during the grace period', async () => {
+    const { service, storage } = svc();
+    const rotatable = service as RotatableService;
+    const created = await service.create({
+      tenantId: 't1',
+      name: 'old key',
+      environment: 'test',
+      scopes: [{ resource: 'reports', level: 'write' }],
+      createdBy: 'user_1',
+    });
+
+    const rotated = await rotatable.rotate(created.id, {
+      gracePeriodMs: 7 * 24 * 60 * 60 * 1000,
+      name: 'new key',
+      createdBy: 'user_2',
+    });
+
+    expect(rotated.id).toBe('key_2');
+    expect(rotated.replacedKeyId).toBe(created.id);
+    expect(rotated.key).toMatch(/^nk_test_[A-Za-z0-9]{12}_[A-Za-z0-9]{32}$/);
+    expect(rotated.key).not.toBe(created.key);
+    expect(rotated.graceExpiresAt.toISOString()).toBe('2026-01-08T00:00:00.000Z');
+
+    await expect(service.verify(created.key)).resolves.toMatchObject({
+      keyId: created.id,
+      tenantId: 't1',
+      environment: 'test',
+      scopes: ['reports:write'],
+    });
+    await expect(service.verify(rotated.key)).resolves.toMatchObject({
+      keyId: rotated.id,
+      tenantId: 't1',
+      environment: 'test',
+      scopes: ['reports:write'],
+    });
+
+    const records = await storage.listByTenant('t1');
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: created.id,
+          expiresAt: rotated.graceExpiresAt,
+          rotatedAt: new Date('2026-01-01T00:00:00Z'),
+          replacedByKeyId: rotated.id,
+        }),
+        expect.objectContaining({
+          id: rotated.id,
+          name: 'new key',
+          createdBy: 'user_2',
+          rotatedAt: null,
+          replacedByKeyId: null,
+        }),
+      ]),
+    );
+  });
+
+  it('expires the old key after the grace period while the replacement remains valid', async () => {
+    let now = new Date('2026-01-01T00:00:00Z');
+    const { service } = svc({ clock: () => now });
+    const rotatable = service as RotatableService;
+    const created = await service.create({
+      tenantId: 't1',
+      name: 'old key',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+
+    const rotated = await rotatable.rotate(created.id, { gracePeriodMs: 1_000 });
+
+    now = new Date('2026-01-01T00:00:02Z');
+
+    await expect(service.verify(created.key)).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Expired,
+    });
+    await expect(service.verify(rotated.key)).resolves.toMatchObject({
+      keyId: rotated.id,
+    });
+  });
+
+  it('rejects rotation for a revoked key', async () => {
+    const { service } = svc();
+    const rotatable = service as RotatableService;
+    const created = await service.create({
+      tenantId: 't1',
+      name: 'old key',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+
+    await service.revoke(created.id);
+
+    await expect(rotatable.rotate(created.id)).rejects.toMatchObject({
+      code: 'api_key_not_rotatable',
+    });
+  });
+
+  it('retries when storage reports a duplicate prefix during rotation', async () => {
+    const oldRecord: ApiKeyRecord = {
+      id: 'key_1',
+      tenantId: 't1',
+      name: 'old key',
+      environment: 'live',
+      prefix: 'abcdefghijkl',
+      hash: 'f'.repeat(64),
+      pepperVersion: 1,
+      scopes: ['reports:read'],
+      lastUsedAt: null,
+      expiresAt: null,
+      revokedAt: null,
+      rotatedAt: null,
+      replacedByKeyId: null,
+      createdBy: 'user_1',
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    const rotate = jest
+      .fn<ReturnType<ApiKeyStorage['rotate']>, Parameters<ApiKeyStorage['rotate']>>()
+      .mockRejectedValueOnce(new Error('duplicate prefix: abcdefghijkl'))
+      .mockResolvedValue(undefined);
+    const storage: ApiKeyStorage = {
+      insert: jest.fn().mockResolvedValue(undefined),
+      findById: jest.fn().mockResolvedValue(oldRecord),
+      findByPrefix: jest.fn().mockResolvedValue(null),
+      listByTenant: jest.fn().mockResolvedValue([]),
+      markRevoked: jest.fn().mockResolvedValue(undefined),
+      touchLastUsed: jest.fn().mockResolvedValue(undefined),
+      rotate,
+    };
+    const service = new ApiKeysService({
+      storage,
+      hasher: new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 }),
+      namespace: 'nk',
+      idFactory: (() => {
+        let counter = 1;
+        return () => `key_${++counter}`;
+      })(),
+      clock: () => new Date('2026-01-01T00:00:00Z'),
+    });
+    const rotatable = service as RotatableService;
+
+    const rotated = await rotatable.rotate(oldRecord.id);
+
+    expect(rotate).toHaveBeenCalledTimes(2);
+    expect(rotated.id).toBe('key_3');
+    expect(rotated.key).toMatch(/^nk_live_[A-Za-z0-9]{12}_[A-Za-z0-9]{32}$/);
+  });
+});
+
+describe('ApiKeysService lifecycle events and TTL policy', () => {
+  it('emits created revoked rotated and auth_failed events without raw key material', async () => {
+    const events: Record<string, unknown>[] = [];
+    const { service, storage } = svc({
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    const rotatable = service as RotatableService;
+
+    const created = await service.create({
+      tenantId: 't1',
+      name: 'primary',
+      scopes: [{ resource: 'reports', level: 'read' }],
+      createdBy: 'user_1',
+    });
+    const [createdRecord] = await storage.listByTenant('t1');
+
+    const rotated = await rotatable.rotate(created.id, {
+      gracePeriodMs: 1_000,
+      createdBy: 'user_2',
+    });
+    await service.revoke(rotated.id);
+
+    await expect(service.verify(`nk_live_${'z'.repeat(12)}_${'z'.repeat(32)}`)).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Invalid,
+    });
+
+    expect(events.map((event) => event.type)).toEqual([
+      'api_key.created',
+      'api_key.rotated',
+      'api_key.revoked',
+      'api_key.auth_failed',
+    ]);
+    expect(events[0]).toMatchObject({
+      type: 'api_key.created',
+      keyId: created.id,
+      tenantId: 't1',
+      prefix: createdRecord.prefix,
+      environment: 'live',
+      scopes: ['reports:read'],
+      createdBy: 'user_1',
+    });
+    expect(events[1]).toMatchObject({
+      type: 'api_key.rotated',
+      tenantId: 't1',
+      oldKeyId: created.id,
+      newKeyId: rotated.id,
+      environment: 'live',
+      scopes: ['reports:read'],
+      createdBy: 'user_2',
+    });
+    expect(events[2]).toMatchObject({
+      type: 'api_key.revoked',
+      keyId: rotated.id,
+      tenantId: 't1',
+      environment: 'live',
+    });
+    expect(events[3]).toMatchObject({
+      type: 'api_key.auth_failed',
+      prefix: 'zzzzzzzzzzzz',
+      code: ApiKeyErrorCode.Invalid,
+    });
+
+    const serializedEvents = JSON.stringify(events);
+    expect(serializedEvents).not.toContain(created.key);
+    expect(serializedEvents).not.toContain(rotated.key);
+    expect(serializedEvents).not.toContain(createdRecord.hash);
+  });
+
+  it('isolates lifecycle event hook failures and reports them to onEventError', async () => {
+    const onEventError = jest.fn();
+    const { service } = svc({
+      onEvent: () => {
+        throw new Error('sink down');
+      },
+      onEventError,
+    });
+
+    await expect(
+      service.create({
+        tenantId: 't1',
+        name: 'primary',
+        scopes: [{ resource: 'reports', level: 'read' }],
+      }),
+    ).resolves.toMatchObject({ id: 'key_1' });
+
+    expect(onEventError).toHaveBeenCalledWith(expect.any(Error), expect.objectContaining({
+      type: 'api_key.created',
+    }));
+  });
+
+  it('emits api_key_used only when usage events are enabled', async () => {
+    const disabledEvents: Record<string, unknown>[] = [];
+    const disabled = svc({
+      onEvent: (event) => {
+        disabledEvents.push(event);
+      },
+    });
+    const disabledCreated = await disabled.service.create({
+      tenantId: 't1',
+      name: 'primary',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+    await disabled.service.verify(disabledCreated.key);
+
+    const enabledEvents: Record<string, unknown>[] = [];
+    const enabled = svc({
+      onEvent: (event) => {
+        enabledEvents.push(event);
+      },
+      emitUsageEvents: true,
+    });
+    const enabledCreated = await enabled.service.create({
+      tenantId: 't1',
+      name: 'primary',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+    await enabled.service.verify(enabledCreated.key);
+
+    expect(disabledEvents.map((event) => event.type)).toEqual(['api_key.created']);
+    expect(enabledEvents.map((event) => event.type)).toEqual(['api_key.created', 'api_key.used']);
+    expect(enabledEvents[1]).toMatchObject({
+      type: 'api_key.used',
+      keyId: enabledCreated.id,
+      tenantId: 't1',
+      environment: 'live',
+      scopes: ['reports:read'],
+    });
+  });
+
+  it('applies a default expiration from ttlPolicy', async () => {
+    const { service, storage } = svc({
+      ttlPolicy: { defaultExpiresInMs: 60_000 },
+    });
+
+    await service.create({
+      tenantId: 't1',
+      name: 'primary',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+
+    const [record] = await storage.listByTenant('t1');
+    expect(record.expiresAt?.toISOString()).toBe('2026-01-01T00:01:00.000Z');
+  });
+
+  it('rejects never-expiring keys when ttlPolicy disallows them', async () => {
+    const { service } = svc({
+      ttlPolicy: { allowNeverExpires: false },
+    });
+
+    await expect(
+      service.create({
+        tenantId: 't1',
+        name: 'primary',
+        scopes: [{ resource: 'reports', level: 'read' }],
+      }),
+    ).rejects.toThrow(/expiration is required/);
+  });
+
+  it('rejects create and rotate expirations beyond ttlPolicy maxExpiresInMs', async () => {
+    const { service } = svc({
+      ttlPolicy: { maxExpiresInMs: 60_000 },
+    });
+    const created = await service.create({
+      tenantId: 't1',
+      name: 'primary',
+      scopes: [{ resource: 'reports', level: 'read' }],
+      expiresAt: new Date('2026-01-01T00:01:00Z'),
+    });
+    const rotatable = service as RotatableService;
+
+    await expect(
+      service.create({
+        tenantId: 't1',
+        name: 'too long',
+        scopes: [{ resource: 'reports', level: 'read' }],
+        expiresAt: new Date('2026-01-01T00:01:01Z'),
+      }),
+    ).rejects.toThrow(/expiration exceeds maximum/);
+
+    await expect(
+      rotatable.rotate(created.id, {
+        expiresAt: new Date('2026-01-01T00:01:01Z'),
+      }),
+    ).rejects.toThrow(/expiration exceeds maximum/);
   });
 });
 

@@ -26,21 +26,28 @@ nestarc의 기존 축(`tenancy`, `audit-log`, `access-control` 예정)과 자연
 
 - **도입 마찰**: `npm install` → 모듈 등록 → 마이그레이션 → Guard 적용까지 15분 이내
 - **보안 기본값**: 안전하지 않은 구성이 기본이 되지 않는다. SHA-256 해시, pepper 필수, 평문 노출은 최초 1회
-- **성능**: 키 검증 p99 < 3ms (in-memory cache 포함 가정)
-- **통합**: `@nestarc/tenancy` 사용 시 추가 코드 없이 RLS 컨텍스트가 자동 주입된다
+- **성능**: prefix 조회 + SHA-256 검증 경로를 유지하고, 캐시는 일관성 검증 후 별도 버전에서 도입한다
+- **통합**: `contextWriter`와 lifecycle event hook으로 `@nestarc/tenancy`, `@nestarc/audit-log`와 결합할 수 있다
 
 ## 5. 범위
 
 ### 포함 (v0.1)
-- 키 발급, 검증, 회전, 폐기, 만료
+- 키 발급, 검증, 폐기, 만료
 - SHA-256 + pepper 해싱
 - Stripe 스타일 포맷: `nk_{env}_{prefix}_{secret}`
 - Resource × (read|write) scope 매트릭스
 - test/live 환경 분리 (prefix + 컬럼)
 - NestJS Guard + `@RequireScope` 데코레이터
-- `@nestarc/tenancy` ALS 자동 주입
-- `@nestarc/audit-log` 이벤트(생성/회전/폐기/실패 인증) 자동 기록
 - 사용 추적: `lastUsedAt` debounced 업데이트
+- Prisma/in-memory storage adapter와 storage contract test
+
+### 포함 (v0.2)
+- 무중단 키 회전: replacement key 발급 + grace period
+- lifecycle event hook: 생성/회전/폐기/인증실패, opt-in 사용 이벤트
+- 안정적인 request context contract: `ApiKeyContext.prefix`, `@CurrentApiKey()`, `getApiKeyContext()`
+- `contextWriter` hook을 통한 tenancy/RLS bridge
+- TTL policy: 기본 만료, 최대 만료, 무기한 키 금지 옵션
+- v0.1 문서와 테스트 정렬
 
 ### 제외
 - OAuth, JWT 세션, end-user 로그인 (Clerk/Auth0/better-auth 영역)
@@ -55,17 +62,17 @@ nestarc의 기존 축(`tenancy`, `audit-log`, `access-control` 예정)과 자연
 |---|---|---|---|---|---|
 | 셀프호스트 | ✗ | 부분 | ✗ | ✓ | ✓ |
 | Prisma 통합 | — | ✗ | ✗ | 수동 | ✓ |
-| Multi-tenant 네이티브 | — | ✗ | 제한적 | 수동 | ✓ (tenancy 연동) |
+| Multi-tenant 네이티브 | — | ✗ | 제한적 | 수동 | ✓ (context + hook) |
 | Scope 모델 | ✓ | ✓ | ✗ | 수동 | ✓ (Stripe 호환) |
 | Test/Live 분리 | ✓ | ✓ | ✗ | 수동 | ✓ |
-| Audit 통합 | ✓ | ✓ | 부분 | 수동 | ✓ (audit-log 연동) |
+| Audit 통합 | ✓ | ✓ | 부분 | 수동 | ✓ (event hook) |
 
 ## 7. 비기능 요건
 
 - **보안**: 평문 로깅 금지(logger redact 규칙 제공), 상수시간 비교, 실패 응답 시간 일정화
-- **가용성**: 폐기는 5초 이내 반영(캐시 TTL)
-- **관찰성**: 생성/회전/폐기/인증실패 4개 이벤트 publish
-- **테스트 가능성**: `createTestKey()` 헬퍼로 통합 테스트 1줄 작성
+- **가용성**: 내장 verification cache가 없으므로 폐기와 회전은 storage 조회 경로에 즉시 반영된다
+- **관찰성**: 생성/회전/폐기/인증실패 이벤트 publish, 사용 이벤트는 opt-in
+- **테스트 가능성**: storage contract suite와 in-memory adapter로 integration test를 구성한다
 
 ## 8. 의존성과 연결
 
@@ -80,20 +87,22 @@ nestarc의 기존 축(`tenancy`, `audit-log`, `access-control` 예정)과 자연
 - Prisma 스키마 + 마이그레이션 가이드
 - SHA-256 해싱
 - 문자열 flatten scope (`"resource:level"`)
-- tenancy/audit-log 기본 통합
+- `lastUsedAt` best-effort tracking
 - README + quickstart
 
 **v0.2**
-- 키 회전 (graceperiod)
-- Test/Live 모드 엄격 분리 데코레이터
-- 캐시 계층 (Redis 선택)
-- `@RequireScope('resource', 'write')` decorator API
+- 키 회전 (grace period)
+- lifecycle event hook
+- stable request context helper/decorator
+- TTL policy
+- tenancy/audit-log bridge recipe를 위한 `contextWriter`
 
 **v0.3**
 - `@nestarc/access-control` adapter
 - argon2 해싱 옵션
 - IP allowlist per key
 - 사용량 메트릭 내보내기
+- Redis verification cache 검토
 
 ## 10. 리스크와 대응
 

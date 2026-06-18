@@ -5,17 +5,27 @@ import {
   API_KEY_CONTEXT_PROPERTY,
 } from '../../src/api-keys.guard';
 import { ApiKeysService } from '../../src/api-keys.service';
+import { getApiKeyContext } from '../../src/context';
+import { CurrentApiKey } from '../../src/decorators/current-api-key.decorator';
 import { ENVIRONMENT_METADATA } from '../../src/decorators/require-environment.decorator';
 import { SCOPE_METADATA } from '../../src/decorators/require-scope.decorator';
 import { Sha256Hasher } from '../../src/hasher';
 import { InMemoryApiKeyStorage } from '../../src/storage/in-memory-storage';
+import type { ApiKeyContext } from '../../src/types';
 
-function setup() {
+function setup(contextWriter?: (apiKey: ApiKeyContext, request: unknown) => void | Promise<void>) {
   const storage = new InMemoryApiKeyStorage();
   const hasher = new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 });
   const service = new ApiKeysService({ storage, hasher, namespace: 'nk' });
   const reflector = new Reflector();
-  const guard = new ApiKeysGuard(service, reflector);
+  const GuardCtor = ApiKeysGuard as unknown as {
+    new (
+      service: ApiKeysService,
+      reflector: Reflector,
+      contextWriter?: (apiKey: ApiKeyContext, request: unknown) => void | Promise<void>,
+    ): ApiKeysGuard;
+  };
+  const guard = new GuardCtor(service, reflector, contextWriter);
 
   return { guard, service, reflector };
 }
@@ -60,7 +70,10 @@ describe('ApiKeysGuard', () => {
       tenantId: 't1',
       scopes: ['invoices:write'],
       environment: 'live',
+      prefix: expect.stringMatching(/^[A-Za-z0-9]{12}$/),
     });
+    expect(getApiKeyContext(req)).toBe(req[API_KEY_CONTEXT_PROPERTY]);
+    expect(typeof CurrentApiKey).toBe('function');
   });
 
   it('enforces @RequireScope', async () => {
@@ -98,5 +111,44 @@ describe('ApiKeysGuard', () => {
     await expect(guard.canActivate(ctx({ authorization: `Bearer ${key}` }))).rejects.toMatchObject({
       code: 'api_key_environment_mismatch',
     });
+  });
+
+  it('runs contextWriter only after scope and environment checks pass', async () => {
+    const contextWriter = jest.fn();
+    const { guard, service, reflector } = setup(contextWriter);
+    const { key } = await service.create({
+      tenantId: 't1',
+      name: 'x',
+      scopes: [{ resource: 'reports', level: 'write' }],
+    });
+
+    jest.spyOn(reflector, 'getAllAndOverride').mockImplementation((metadataKey: unknown) => {
+      return metadataKey === SCOPE_METADATA
+        ? { resource: 'reports', level: 'read' }
+        : undefined;
+    });
+    const executionContext = ctx({ authorization: `Bearer ${key}` });
+
+    await expect(guard.canActivate(executionContext)).resolves.toBe(true);
+    expect(contextWriter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: 't1',
+        scopes: ['reports:write'],
+        prefix: expect.stringMatching(/^[A-Za-z0-9]{12}$/),
+      }),
+      executionContext.switchToHttp().getRequest(),
+    );
+
+    contextWriter.mockClear();
+    jest.spyOn(reflector, 'getAllAndOverride').mockImplementation((metadataKey: unknown) => {
+      return metadataKey === SCOPE_METADATA
+        ? { resource: 'reports', level: 'write' }
+        : 'test';
+    });
+
+    await expect(guard.canActivate(ctx({ authorization: `Bearer ${key}` }))).rejects.toMatchObject({
+      code: 'api_key_environment_mismatch',
+    });
+    expect(contextWriter).not.toHaveBeenCalled();
   });
 });

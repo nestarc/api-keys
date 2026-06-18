@@ -1,6 +1,8 @@
 # @nestarc/api-keys — v0.1 Technical Spec
 
-본 문서는 v0.1에서 고정되는 기술 결정을 기록한다. 변경은 RFC 수준의 논의를 거친다.
+본 문서는 v0.1에서 고정된 기술 결정을 기록한다. 0.2.0에서 추가된 회전,
+lifecycle event, context helper의 상세 스펙은 [`spec-0.2.md`](./spec-0.2.md)를
+기준으로 한다.
 
 ## 1. 키 포맷
 
@@ -25,9 +27,10 @@ nk_live_a8f3K2xPqR4v_7hQmN2pLw9xYtB5vCzF4jK1mR6nV8sU3aE
 ### 구성 옵션
 ```ts
 ApiKeysModule.forRoot({
-  prefix: 'acme',           // 기본 'nk'
-  environments: ['live'],   // 기본 ['live'], test 활성화 시 ['live', 'test']
-  pepper: process.env.API_KEY_PEPPER,  // 필수
+  namespace: 'acme',        // 기본 'nk'
+  peppers: { 1: process.env.API_KEY_PEPPER! },
+  currentPepperVersion: 1,
+  storage,
 })
 ```
 
@@ -46,7 +49,7 @@ ApiKeysModule.forRoot({
 - 스키마에 `pepperVersion: Int` 컬럼 보관.
 - 모듈 설정에서 `peppers: { 1: ..., 2: ... }` 맵 허용.
 - 검증 시 해당 버전 pepper로 비교.
-- v0.2에서 rekey 유틸리티 제공.
+- 새로 생성되거나 회전된 user key는 `currentPepperVersion`을 사용한다.
 
 ## 3. Scope 모델
 
@@ -68,7 +71,7 @@ DB 저장 및 비교는 flatten된 문자열.
 
 ### 적용
 ```ts
-@UseGuards(ApiKeyGuard)
+@UseGuards(ApiKeysGuard)
 @RequireScope('invoices', 'write')
 @Post('/invoices')
 createInvoice() {}
@@ -114,11 +117,14 @@ model ApiKey {
   lastUsedAt     DateTime?
   expiresAt      DateTime?
   revokedAt      DateTime?
+  rotatedAt      DateTime?
+  replacedByKeyId String?
   createdBy      String?
   createdAt      DateTime  @default(now())
 
   @@index([tenantId, environment])
-  @@index([prefix])
+  @@index([tenantId, revokedAt])
+  @@index([replacedByKeyId])
 }
 ```
 
@@ -149,11 +155,12 @@ model ApiKey {
 6. 환경 검증: row.environment === expected (데코레이터가 있을 경우)
 7. Scope 검증: @RequireScope 대비 row.scopes 포함 여부
 8. 성공:
-   - ALS에 { tenantId, keyId, scopes, environment } 주입
+   - request.apiKey에 { tenantId, keyId, scopes, environment, prefix } 주입
+   - contextWriter가 있으면 consumer의 request-local context에 bridge
    - lastUsedAt debounced update (fire-and-forget)
-   - audit-log: api_key.authenticated (선택적, 기본 off — 너무 잦음)
+   - api_key.used lifecycle event는 선택적, 기본 off
 9. 실패:
-   - audit-log: api_key.auth_failed (prefix만 기록, 평문 금지)
+   - lifecycle hook: api_key.auth_failed (prefix만 기록, 평문 금지)
    - 일정 응답 시간 유지 (prefix 미존재 시 dummy hash 수행)
 ```
 
@@ -170,17 +177,23 @@ apiKeys.create(input: {
   createdBy?: string;
 }): Promise<{ id: string; key: string }>;   // key는 이 반환값에서만 노출
 
-apiKeys.verify(rawKey: string, context?: {
-  expectedEnvironment?: 'live' | 'test';
-}): Promise<ApiKeyContext | null>;
+apiKeys.verify(rawKey: string): Promise<ApiKeyContext>;
 
 apiKeys.revoke(id: string): Promise<void>;
 apiKeys.list(tenantId: string, opts?: { includeRevoked?: boolean }): Promise<ApiKey[]>;
+apiKeys.rotate(id: string, opts?: {
+  gracePeriodMs?: number;
+  name?: string;
+  createdBy?: string;
+  expiresAt?: Date | null;
+}): Promise<{ id: string; key: string; replacedKeyId: string; graceExpiresAt: Date }>;
 
 // Guards & Decorators
-@UseGuards(ApiKeyGuard)
+@UseGuards(ApiKeysGuard)
 @RequireScope(resource: string, level: 'read' | 'write')
 @RequireEnvironment(env: 'live' | 'test')
+@CurrentApiKey()
+getApiKeyContext(request)
 
 // Context
 ApiKeyContext {
@@ -188,6 +201,7 @@ ApiKeyContext {
   keyId: string;
   scopes: string[];
   environment: 'live' | 'test';
+  prefix: string;
 }
 ```
 
@@ -217,18 +231,20 @@ ApiKeyContext {
 ## 10. 다른 패키지와의 결합
 
 ### @nestarc/tenancy
-Guard 성공 시 `ApiKeyContext.tenantId`를 ALS에 주입. `tenancy`가 동일 ALS를 구독하여 RLS 컨텍스트를 자동 설정한다. consumer 추가 코드 없음.
+Guard 성공 시 `request.apiKey`에 `ApiKeyContext`를 붙인다. consumer는 `contextWriter`
+hook에서 `tenantId`를 자신의 ALS/RLS context에 주입할 수 있다.
 
 ### @nestarc/audit-log
-다음 이벤트를 기본 publish:
+다음 lifecycle event를 `onEvent` hook으로 publish할 수 있다:
 - `api_key.created`
 - `api_key.revoked`
+- `api_key.rotated`
 - `api_key.auth_failed` (rate-limited, 초당 N개 초과 시 샘플링)
 
-`api_key.authenticated`는 **기본 off**. 너무 잦아 로그 오염 유발.
+`api_key.used`는 **기본 off**. 너무 잦아 로그 오염 유발.
 
 ### @nestarc/access-control (v0.3)
 scope 문자열을 access-control permission으로 매핑하는 adapter 제공. `@RequireScope`와 `@RequirePermission`이 동일 정보원을 사용하도록 한다.
 
 ### @nestarc/outbox
-`lastUsedAt` 정밀 추적이 필요한 consumer는 `api_key.used` 이벤트를 outbox로 발행하는 옵션을 enable 가능 (v0.2).
+`lastUsedAt` 정밀 추적이 필요한 consumer는 `api_key.used` 이벤트를 outbox로 발행하는 옵션을 enable 가능.

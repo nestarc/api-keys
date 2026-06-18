@@ -10,20 +10,23 @@ generator client {
 }
 
 model ApiKey {
-  id            String   @id @default(cuid())
-  tenantId      String
-  name          String
-  environment   String
-  prefix        String   @unique
-  hash          String
-  pepperVersion Int      @default(1)
-  scopes        String[]
-  lastUsedAt    DateTime?
-  expiresAt     DateTime?
-  revokedAt     DateTime?
-  createdBy     String?
-  createdAt     DateTime @default(now())
+  id              String    @id @default(cuid())
+  tenantId        String
+  name            String
+  environment     String
+  prefix          String    @unique
+  hash            String
+  pepperVersion   Int       @default(1)
+  scopes          String[]
+  lastUsedAt      DateTime?
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  rotatedAt       DateTime?
+  replacedByKeyId String?
+  createdBy       String?
+  createdAt       DateTime  @default(now())
 
   @@index([tenantId, environment])
   @@index([tenantId, revokedAt])
+  @@index([replacedByKeyId])
 }

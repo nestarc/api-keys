@@ -1,6 +1,11 @@
-import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Inject, Injectable, Optional } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ApiKeysService } from './api-keys.service';
+import {
+  API_KEY_CONTEXT_PROPERTY,
+  API_KEY_CONTEXT_WRITER,
+  ApiKeyContextWriter,
+} from './context';
 import { ENVIRONMENT_METADATA } from './decorators/require-environment.decorator';
 import {
   RequiredScope,
@@ -10,13 +15,16 @@ import { ApiKeyError, ApiKeyErrorCode } from './errors';
 import { scopeSatisfies } from './scope-matcher';
 import type { Environment } from './types';
 
-export const API_KEY_CONTEXT_PROPERTY = 'apiKey';
+export { API_KEY_CONTEXT_PROPERTY };
 
 @Injectable()
 export class ApiKeysGuard implements CanActivate {
   constructor(
     private readonly service: ApiKeysService,
     private readonly reflector: Reflector,
+    @Optional()
+    @Inject(API_KEY_CONTEXT_WRITER)
+    private readonly contextWriter?: ApiKeyContextWriter,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -53,6 +61,7 @@ export class ApiKeysGuard implements CanActivate {
     }
 
     request[API_KEY_CONTEXT_PROPERTY] = apiKeyContext;
+    await this.contextWriter?.(apiKeyContext, request);
     return true;
   }
 }

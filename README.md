@@ -11,8 +11,12 @@ Secure, tenant-scoped API keys for NestJS + Prisma. SHA-256 hashed, Stripe-style
 - **Stripe-style key format** — `<namespace>_<env>_<12-char-prefix>_<32-char-secret>`, indexable by prefix.
 - **Timing-safe verification** with SHA-256 + versioned peppers, ready for rotation.
 - **Tenant-scoped by design** — every key belongs to a `tenantId` and surfaces it via `ApiKeyContext`.
+- **Zero-downtime user key rotation** — issue a replacement key with a configurable grace window.
 - **Scope system** — resource/level pairs (`reports:read`, `reports:write`) with `write`-implies-`read` semantics.
 - **Environment isolation** — `live` vs `test` keys that cannot cross over.
+- **Lifecycle hooks** — creation, revocation, rotation, auth-failure, and opt-in usage events with audit-safe payloads.
+- **Stable request context** — `@CurrentApiKey()`, `getApiKeyContext()`, and an optional `contextWriter` bridge.
+- **TTL policy** — optional default expiration, maximum expiration, and no-never-expires enforcement.
 - **Pluggable storage** — ships with Prisma and in-memory adapters plus a reusable contract suite.
 - **NestJS-native** — `ApiKeysModule.forRoot`, `ApiKeysGuard`, `@RequireScope`, `@RequireEnvironment`.
 - **Typed errors** — `ApiKeyError` with stable `code` values mapped to HTTP statuses.
@@ -52,15 +56,20 @@ Use a product-specific `namespace` such as `acme` or `billing` instead of relyin
 
 ```typescript
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import { ApiKeysGuard, RequireScope } from '@nestarc/api-keys';
+import {
+  ApiKeyContext,
+  ApiKeysGuard,
+  CurrentApiKey,
+  RequireScope,
+} from '@nestarc/api-keys';
 
 @Controller('reports')
 @UseGuards(ApiKeysGuard)
 export class ReportsController {
   @Get()
   @RequireScope('reports', 'read')
-  list() {
-    return [];
+  list(@CurrentApiKey() apiKey: ApiKeyContext) {
+    return { tenantId: apiKey.tenantId, keyId: apiKey.keyId };
   }
 }
 ```
@@ -102,7 +111,7 @@ Use `test` keys in staging and customer sandbox traffic so a leaked test key can
 
 ## Pepper rotation
 
-Peppers are a server-side secret mixed into the hash. Rotate them by adding a new version and pointing `currentPepperVersion` at it. Old keys keep working because each record stores the version it was hashed with:
+Peppers are a server-side secret mixed into the hash. Pepper rotation is different from user API key rotation: it changes the server-side hashing secret for newly issued keys, not the raw key shown to customers. Rotate peppers by adding a new version and pointing `currentPepperVersion` at it. Old keys keep working because each record stores the version it was hashed with:
 
 ```typescript
 ApiKeysModule.forRoot({
@@ -118,6 +127,22 @@ ApiKeysModule.forRoot({
 
 The module fails fast at startup if `currentPepperVersion` is missing from `peppers`, so a misconfigured deployment never boots with keys it can't verify.
 
+## User key rotation
+
+Use `rotate()` when a customer needs to replace an API key without downtime:
+
+```typescript
+const replacement = await apiKeys.rotate(keyId, {
+  gracePeriodMs: 10 * 60 * 1000,
+  name: 'Primary replacement',
+  createdBy: 'user_123',
+});
+
+// replacement.key is returned ONCE; show it to the user and discard.
+```
+
+The replacement keeps the old key's tenant, environment, scopes, and expiration unless you override them. The old key is not revoked; it receives `rotatedAt`, `replacedByKeyId`, and an `expiresAt` equal to the grace deadline. If the old key already expires earlier, the earlier expiration wins.
+
 ## Revoking and listing keys
 
 ```typescript
@@ -126,7 +151,33 @@ const active = await apiKeys.list('tenant_123');             // active keys only
 const all = await apiKeys.list('tenant_123', { includeRevoked: true });
 ```
 
-Revocation is idempotent. Revoked keys remain in storage so you can audit historical usage.
+Revoked keys remain in storage so you can audit historical usage. Use revocation, not grace rotation, when a key is known to be compromised.
+
+## Lifecycle events
+
+`onEvent` receives audit-safe lifecycle payloads. Raw keys, hashes, and peppers are never included. `api_key.used` is off by default because it can be high volume.
+
+```typescript
+ApiKeysModule.forRoot({
+  namespace: 'acme',
+  peppers: { 1: process.env.API_KEY_PEPPER! },
+  storage: new PrismaApiKeyStorage(prisma),
+  ttlPolicy: {
+    defaultExpiresInMs: 90 * 24 * 60 * 60 * 1000,
+    maxExpiresInMs: 365 * 24 * 60 * 60 * 1000,
+    allowNeverExpires: false,
+  },
+  emitUsageEvents: false,
+  onEvent: async (event) => {
+    await auditLog.record(event);
+  },
+  onEventError: (error, event) => {
+    logger.warn({ error, eventType: event.type }, 'api key event hook failed');
+  },
+});
+```
+
+For tenancy or RLS integration, pass `contextWriter` and write the verified `ApiKeyContext` into your own request-local context after scope and environment checks pass.
 
 ## Errors
 
@@ -144,6 +195,8 @@ Verification and authorization failures throw `ApiKeyError` with a stable `code`
 
 Use these codes (not messages) to branch in client code or structured logs.
 
+Rotation precondition failures throw `ApiKeyOperationError` with `api_key_record_not_found` or `api_key_not_rotatable`.
+
 ## Logging
 
 Never log raw API keys. The package exports `API_KEY_REDACT_REGEX` so you can redact them before request or error logs are written.
@@ -160,6 +213,7 @@ export function redactApiKeys(value: string): string {
 
 - [`docs/prd.md`](docs/prd.md) Product requirements
 - [`docs/spec.md`](docs/spec.md) Technical spec
+- [`docs/spec-0.2.md`](docs/spec-0.2.md) v0.2 technical spec
 - [`CHANGELOG.md`](CHANGELOG.md) Release history
 
 ## Contributing

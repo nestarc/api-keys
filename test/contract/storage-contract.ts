@@ -1,6 +1,16 @@
 import type { ApiKeyStorage } from '../../src/storage/api-key-storage.interface';
 import type { ApiKeyRecord } from '../../src/types';
 
+interface RotatableStorage extends ApiKeyStorage {
+  findById(id: string): Promise<ApiKeyRecord | null>;
+  rotate(input: {
+    oldKeyId: string;
+    newRecord: ApiKeyRecord;
+    oldExpiresAt: Date;
+    rotatedAt: Date;
+  }): Promise<void>;
+}
+
 function fixture(overrides: Partial<ApiKeyRecord> = {}): ApiKeyRecord {
   return {
     id: 'key_1',
@@ -14,6 +24,8 @@ function fixture(overrides: Partial<ApiKeyRecord> = {}): ApiKeyRecord {
     lastUsedAt: null,
     expiresAt: null,
     revokedAt: null,
+    rotatedAt: null,
+    replacedByKeyId: null,
     createdBy: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     ...overrides,
@@ -39,6 +51,18 @@ export function storageContract(name: string, factory: () => ApiKeyStorage): voi
 
     it('findByPrefix returns null when absent', async () => {
       await expect(storage.findByPrefix('missing______')).resolves.toBeNull();
+    });
+
+    it('findById returns the record when present', async () => {
+      const rotatable = storage as RotatableStorage;
+      const record = fixture();
+
+      await storage.insert(record);
+
+      await expect(rotatable.findById(record.id)).resolves.toMatchObject({
+        id: record.id,
+        prefix: record.prefix,
+      });
     });
 
     it('listByTenant excludes revoked by default', async () => {
@@ -81,6 +105,45 @@ export function storageContract(name: string, factory: () => ApiKeyStorage): voi
 
       const found = await storage.findByPrefix(record.prefix);
       expect(found?.lastUsedAt?.toISOString()).toBe(lastUsedAt.toISOString());
+    });
+
+    it('rotate inserts the new record and expires the old record', async () => {
+      const rotatable = storage as RotatableStorage;
+      const oldRecord = fixture({
+        id: 'old_key',
+        prefix: 'oldprefix001',
+      });
+      const newRecord = fixture({
+        id: 'new_key',
+        prefix: 'newprefix001',
+        name: 'rotated',
+      });
+      const rotatedAt = new Date('2026-02-01T00:00:00Z');
+      const oldExpiresAt = new Date('2026-02-08T00:00:00Z');
+
+      await storage.insert(oldRecord);
+      await rotatable.rotate({
+        oldKeyId: oldRecord.id,
+        newRecord,
+        oldExpiresAt,
+        rotatedAt,
+      });
+
+      const oldFound = await rotatable.findById(oldRecord.id);
+      const newFound = await rotatable.findById(newRecord.id);
+
+      expect(oldFound).toMatchObject({
+        id: oldRecord.id,
+        expiresAt: oldExpiresAt,
+        rotatedAt,
+        replacedByKeyId: newRecord.id,
+      });
+      expect(newFound).toMatchObject({
+        id: newRecord.id,
+        prefix: newRecord.prefix,
+        rotatedAt: null,
+        replacedByKeyId: null,
+      });
     });
   });
 }
