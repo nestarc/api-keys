@@ -10,6 +10,8 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-02
+
 ### Added
 
 - Per-key IPv4, IPv6, and CIDR allowlists through `allowedIpCidrs`.
