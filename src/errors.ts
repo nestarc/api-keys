@@ -6,6 +6,7 @@ export const ApiKeyErrorCode = {
   Expired: 'api_key_expired',
   EnvironmentMismatch: 'api_key_environment_mismatch',
   ScopeInsufficient: 'api_key_scope_insufficient',
+  IpNotAllowed: 'api_key_ip_not_allowed',
 } as const;
 
 export type ApiKeyErrorCode = (typeof ApiKeyErrorCode)[keyof typeof ApiKeyErrorCode];
@@ -18,6 +19,7 @@ const HTTP_STATUS: Record<ApiKeyErrorCode, number> = {
   api_key_expired: 401,
   api_key_environment_mismatch: 403,
   api_key_scope_insufficient: 403,
+  api_key_ip_not_allowed: 403,
 };
 
 export class ApiKeyError extends Error {

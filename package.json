@@ -20,6 +20,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "bench": "ts-node bench/api-keys.bench.ts",
+    "bench:smoke": "npm run bench -- --iterations 250 --warmup 50 --timing-threshold-ms 0.5",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "prepublishOnly": "npm run build"
@@ -37,6 +38,7 @@
     }
   },
   "devDependencies": {
+    "@nestarc/rbac": "^0.2.0",
     "@nestjs/common": "^10.3.0",
     "@nestjs/core": "^10.3.0",
     "@nestjs/testing": "^10.3.0",
@@ -53,5 +55,8 @@
     "ts-jest": "^29.1.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "ipaddr.js": "^2.2.0"
   }
 }

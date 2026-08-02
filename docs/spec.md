@@ -79,7 +79,7 @@ createInvoice() {}
 
 ### 경로
 - v0.1: 문자열 매칭 엔진 내장
-- v0.3: `@nestarc/access-control` adapter로 위임 가능
+- v0.3: `@nestarc/rbac`는 API key를 subject로 매핑하며 scope와 RBAC permission은 독립적으로 평가
 
 ## 4. 환경 분리
 
@@ -114,6 +114,7 @@ model ApiKey {
   hash           String
   pepperVersion  Int       @default(1)
   scopes         String[]
+  allowedIpCidrs String[]   @default([])
   lastUsedAt     DateTime?
   expiresAt      DateTime?
   revokedAt      DateTime?
@@ -153,13 +154,14 @@ model ApiKey {
      row.hash
    )
 6. 환경 검증: row.environment === expected (데코레이터가 있을 경우)
-7. Scope 검증: @RequireScope 대비 row.scopes 포함 여부
-8. 성공:
+7. IP allowlist 검증: clientIpResolver 결과가 allowedIpCidrs에 포함되는지 확인
+8. Scope 검증: @RequireScope 대비 row.scopes 포함 여부
+9. 성공:
    - request.apiKey에 { tenantId, keyId, scopes, environment, prefix } 주입
    - contextWriter가 있으면 consumer의 request-local context에 bridge
    - lastUsedAt debounced update (fire-and-forget)
    - api_key.used lifecycle event는 선택적, 기본 off
-9. 실패:
+10. 실패:
    - lifecycle hook: api_key.auth_failed (prefix만 기록, 평문 금지)
    - 일정 응답 시간 유지 (prefix 미존재 시 dummy hash 수행)
 ```
@@ -175,6 +177,7 @@ apiKeys.create(input: {
   scopes: Scope[];
   expiresAt?: Date;
   createdBy?: string;
+  allowedIpCidrs?: string[];
 }): Promise<{ id: string; key: string }>;   // key는 이 반환값에서만 노출
 
 apiKeys.verify(rawKey: string): Promise<ApiKeyContext>;
@@ -186,6 +189,7 @@ apiKeys.rotate(id: string, opts?: {
   name?: string;
   createdBy?: string;
   expiresAt?: Date | null;
+  allowedIpCidrs?: string[];
 }): Promise<{ id: string; key: string; replacedKeyId: string; graceExpiresAt: Date }>;
 
 // Guards & Decorators
@@ -202,6 +206,7 @@ ApiKeyContext {
   scopes: string[];
   environment: 'live' | 'test';
   prefix: string;
+  allowedIpCidrs?: string[];
 }
 ```
 
@@ -227,6 +232,7 @@ ApiKeyContext {
 | `api_key_expired` | 401 | 만료됨 |
 | `api_key_environment_mismatch` | 403 | live/test 엔드포인트와 불일치 |
 | `api_key_scope_insufficient` | 403 | scope 부족 |
+| `api_key_ip_not_allowed` | 403 | 요청 IP가 키 allowlist에 없거나 확인 불가 |
 
 ## 10. 다른 패키지와의 결합
 
@@ -243,8 +249,11 @@ hook에서 `tenantId`를 자신의 ALS/RLS context에 주입할 수 있다.
 
 `api_key.used`는 **기본 off**. 너무 잦아 로그 오염 유발.
 
-### @nestarc/access-control (v0.3)
-scope 문자열을 access-control permission으로 매핑하는 adapter 제공. `@RequireScope`와 `@RequirePermission`이 동일 정보원을 사용하도록 한다.
+### @nestarc/rbac (v0.3)
+`@nestarc/rbac/integrations/api-keys`의 `createApiKeySubjectResolver()`가
+`request.apiKey`를 `api_key` subject로 매핑한다. `@RequireScope`는 키에 내장된
+scope를, RBAC `@Can`은 동적으로 저장된 role binding을 확인하며 둘을 함께 쓰면
+두 검사를 모두 통과해야 한다.
 
 ### @nestarc/outbox
 `lastUsedAt` 정밀 추적이 필요한 consumer는 `api_key.used` 이벤트를 outbox로 발행하는 옵션을 enable 가능.

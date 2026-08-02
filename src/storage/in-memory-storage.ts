@@ -17,18 +17,18 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
       throw new Error(`duplicate prefix: ${record.prefix}`);
     }
 
-    this.records.set(record.id, { ...record });
+    this.records.set(record.id, cloneRecord(record));
   }
 
   async findById(id: string): Promise<ApiKeyRecord | null> {
     const record = this.records.get(id);
-    return record ? { ...record } : null;
+    return record ? cloneRecord(record) : null;
   }
 
   async findByPrefix(prefix: string): Promise<ApiKeyRecord | null> {
     for (const record of this.records.values()) {
       if (record.prefix === prefix) {
-        return { ...record };
+        return cloneRecord(record);
       }
     }
 
@@ -44,7 +44,7 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
       ? records
       : records.filter((record) => record.revokedAt === null);
 
-    return visibleRecords.map((record) => ({ ...record }));
+    return visibleRecords.map(cloneRecord);
   }
 
   async markRevoked(id: string, at: Date): Promise<void> {
@@ -86,6 +86,14 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
     oldRecord.expiresAt = input.oldExpiresAt;
     oldRecord.rotatedAt = input.rotatedAt;
     oldRecord.replacedByKeyId = input.newRecord.id;
-    this.records.set(input.newRecord.id, { ...input.newRecord });
+    this.records.set(input.newRecord.id, cloneRecord(input.newRecord));
   }
+}
+
+function cloneRecord(record: ApiKeyRecord): ApiKeyRecord {
+  return {
+    ...record,
+    scopes: [...record.scopes],
+    allowedIpCidrs: [...(record.allowedIpCidrs ?? [])],
+  };
 }

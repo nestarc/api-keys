@@ -6,8 +6,13 @@ import {
   ApiKeyContextWriter,
 } from './context';
 import { Sha256Hasher } from './hasher';
+import {
+  API_KEY_CLIENT_IP_RESOLVER,
+  ApiKeyClientIpResolver,
+  defaultApiKeyClientIpResolver,
+} from './ip-allowlist';
 import type { ApiKeyStorage } from './storage/api-key-storage.interface';
-import type { ApiKeyEventSink, ApiKeyTtlPolicy } from './types';
+import type { ApiKeyEventSink, ApiKeyMetricSink, ApiKeyTtlPolicy } from './types';
 
 export const API_KEYS_OPTIONS = Symbol('API_KEYS_OPTIONS');
 export const API_KEYS_STORAGE = Symbol('API_KEYS_STORAGE');
@@ -21,9 +26,12 @@ export interface ApiKeysModuleOptions {
   onAuthFailed?: ApiKeysServiceDeps['onAuthFailed'];
   onEvent?: ApiKeyEventSink;
   onEventError?: ApiKeysServiceDeps['onEventError'];
+  onMetric?: ApiKeyMetricSink;
+  onMetricError?: ApiKeysServiceDeps['onMetricError'];
   emitUsageEvents?: boolean;
   ttlPolicy?: ApiKeyTtlPolicy;
   contextWriter?: ApiKeyContextWriter;
+  clientIpResolver?: ApiKeyClientIpResolver;
 }
 
 @Module({})
@@ -34,6 +42,10 @@ export class ApiKeysModule {
       { provide: API_KEYS_OPTIONS, useValue: options },
       { provide: API_KEYS_STORAGE, useValue: options.storage },
       { provide: API_KEY_CONTEXT_WRITER, useValue: options.contextWriter },
+      {
+        provide: API_KEY_CLIENT_IP_RESOLVER,
+        useValue: options.clientIpResolver ?? defaultApiKeyClientIpResolver,
+      },
       {
         provide: ApiKeysService,
         useFactory: () =>
@@ -48,6 +60,8 @@ export class ApiKeysModule {
             onAuthFailed: options.onAuthFailed,
             onEvent: options.onEvent,
             onEventError: options.onEventError,
+            onMetric: options.onMetric,
+            onMetricError: options.onMetricError,
             emitUsageEvents: options.emitUsageEvents,
             ttlPolicy: options.ttlPolicy,
           }),

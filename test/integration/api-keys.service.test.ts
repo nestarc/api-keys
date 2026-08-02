@@ -3,7 +3,7 @@ import { ApiKeysService } from '../../src/api-keys.service';
 import { Sha256Hasher } from '../../src/hasher';
 import type { ApiKeyStorage } from '../../src/storage/api-key-storage.interface';
 import { InMemoryApiKeyStorage } from '../../src/storage/in-memory-storage';
-import type { ApiKeyRecord } from '../../src/types';
+import type { ApiKeyRecord, ApiKeyVerificationMetric } from '../../src/types';
 
 interface RotatableService extends ApiKeysService {
   rotate(
@@ -24,6 +24,9 @@ function svc(
     clock: () => Date;
     onEvent: (event: Record<string, unknown>) => void | Promise<void>;
     onEventError: (error: unknown, event: Record<string, unknown>) => void;
+    onMetric: (metric: ApiKeyVerificationMetric) => void | Promise<void>;
+    onMetricError: (error: unknown, metric: ApiKeyVerificationMetric) => void;
+    monotonicClock: () => number;
     emitUsageEvents: boolean;
     ttlPolicy: {
       defaultExpiresInMs?: number;
@@ -34,8 +37,7 @@ function svc(
 ) {
   const storage = new InMemoryApiKeyStorage();
   const hasher =
-    overrides.hasher ??
-    new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 });
+    overrides.hasher ?? new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 });
   const service = new ApiKeysService({
     storage,
     hasher,
@@ -49,6 +51,9 @@ function svc(
     onAuthFailed: overrides.onAuthFailed,
     onEvent: overrides.onEvent,
     onEventError: overrides.onEventError,
+    onMetric: overrides.onMetric,
+    onMetricError: overrides.onMetricError,
+    monotonicClock: overrides.monotonicClock,
     emitUsageEvents: overrides.emitUsageEvents,
     ttlPolicy: overrides.ttlPolicy,
   } as ConstructorParameters<typeof ApiKeysService>[0] & Record<string, unknown>);
@@ -98,6 +103,38 @@ describe('ApiKeysService.create', () => {
     });
 
     expect(result.key.split('_')[1]).toBe('test');
+  });
+
+  it('normalizes and persists an IP allowlist in the verification context', async () => {
+    const { service, storage } = svc();
+
+    const result = await service.create({
+      tenantId: 't1',
+      name: 'restricted',
+      scopes: [{ resource: 'r', level: 'read' }],
+      allowedIpCidrs: ['203.0.113.42', '10.0.0.42/24', '10.0.0.0/24'],
+    });
+
+    await expect(service.verify(result.key)).resolves.toMatchObject({
+      allowedIpCidrs: ['203.0.113.42/32', '10.0.0.0/24'],
+    });
+    await expect(storage.findById(result.id)).resolves.toMatchObject({
+      allowedIpCidrs: ['203.0.113.42/32', '10.0.0.0/24'],
+    });
+  });
+
+  it('rejects an invalid IP allowlist before inserting a record', async () => {
+    const { service, storage } = svc();
+
+    await expect(
+      service.create({
+        tenantId: 't1',
+        name: 'invalid',
+        scopes: [{ resource: 'r', level: 'read' }],
+        allowedIpCidrs: ['not-an-ip'],
+      }),
+    ).rejects.toThrow('invalid IP allowlist entry: not-an-ip');
+    await expect(storage.listByTenant('t1')).resolves.toEqual([]);
   });
 
   it('rejects empty scopes', async () => {
@@ -224,6 +261,26 @@ describe('ApiKeysService.rotate', () => {
     });
   });
 
+  it('preserves or explicitly clears the IP allowlist during rotation', async () => {
+    const { service } = svc();
+    const created = await service.create({
+      tenantId: 't1',
+      name: 'old key',
+      scopes: [{ resource: 'reports', level: 'read' }],
+      allowedIpCidrs: ['203.0.113.0/24'],
+    });
+
+    const preserved = await service.rotate(created.id, { gracePeriodMs: 1_000 });
+    await expect(service.verify(preserved.key)).resolves.toMatchObject({
+      allowedIpCidrs: ['203.0.113.0/24'],
+    });
+
+    const cleared = await service.rotate(preserved.id, { allowedIpCidrs: [] });
+    await expect(service.verify(cleared.key)).resolves.toMatchObject({
+      allowedIpCidrs: [],
+    });
+  });
+
   it('rejects rotation for a revoked key', async () => {
     const { service } = svc();
     const rotatable = service as RotatableService;
@@ -315,7 +372,9 @@ describe('ApiKeysService lifecycle events and TTL policy', () => {
     });
     await service.revoke(rotated.id);
 
-    await expect(service.verify(`nk_live_${'z'.repeat(12)}_${'z'.repeat(32)}`)).rejects.toMatchObject({
+    await expect(
+      service.verify(`nk_live_${'z'.repeat(12)}_${'z'.repeat(32)}`),
+    ).rejects.toMatchObject({
       code: ApiKeyErrorCode.Invalid,
     });
 
@@ -378,9 +437,12 @@ describe('ApiKeysService lifecycle events and TTL policy', () => {
       }),
     ).resolves.toMatchObject({ id: 'key_1' });
 
-    expect(onEventError).toHaveBeenCalledWith(expect.any(Error), expect.objectContaining({
-      type: 'api_key.created',
-    }));
+    expect(onEventError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        type: 'api_key.created',
+      }),
+    );
   });
 
   it('emits api_key_used only when usage events are enabled', async () => {
@@ -477,6 +539,148 @@ describe('ApiKeysService lifecycle events and TTL policy', () => {
         expiresAt: new Date('2026-01-01T00:01:01Z'),
       }),
     ).rejects.toThrow(/expiration exceeds maximum/);
+  });
+});
+
+describe('ApiKeysService verification metrics', () => {
+  it('emits bounded-cardinality metrics for stable verification outcomes', async () => {
+    const metrics: ApiKeyVerificationMetric[] = [];
+    let monotonicTime = 0;
+    const { service } = svc({
+      onMetric: (metric) => {
+        metrics.push(metric);
+      },
+      monotonicClock: () => {
+        monotonicTime += 5;
+        return monotonicTime;
+      },
+    });
+
+    const valid = await service.create({
+      tenantId: 'tenant_metrics',
+      name: 'valid',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+    await service.verify(valid.key);
+
+    await expect(service.verify('garbage')).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Malformed,
+    });
+    await expect(
+      service.verify(`nk_live_${'z'.repeat(12)}_${'z'.repeat(32)}`),
+    ).rejects.toMatchObject({ code: ApiKeyErrorCode.Invalid });
+
+    const revoked = await service.create({
+      tenantId: 'tenant_metrics',
+      name: 'revoked',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+    await service.revoke(revoked.id);
+    await expect(service.verify(revoked.key)).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Revoked,
+    });
+
+    const expired = await service.create({
+      tenantId: 'tenant_metrics',
+      name: 'expired',
+      scopes: [{ resource: 'reports', level: 'read' }],
+      expiresAt: new Date('2025-01-01T00:00:00Z'),
+    });
+    await expect(service.verify(expired.key)).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Expired,
+    });
+
+    expect(metrics.map((metric) => metric.outcome)).toEqual([
+      'success',
+      'malformed',
+      'invalid',
+      'revoked',
+      'expired',
+    ]);
+    expect(metrics[0]).toEqual({
+      type: 'api_key.verification',
+      outcome: 'success',
+      durationMs: 5,
+      environment: 'live',
+    });
+    expect(Object.keys(metrics[0]).sort()).toEqual([
+      'durationMs',
+      'environment',
+      'outcome',
+      'type',
+    ]);
+    expect(JSON.stringify(metrics)).not.toContain(valid.id);
+    expect(JSON.stringify(metrics)).not.toContain('tenant_metrics');
+    expect(JSON.stringify(metrics)).not.toContain(valid.key);
+  });
+
+  it('isolates synchronous and asynchronous metric sink failures', async () => {
+    const syncMetricError = jest.fn();
+    const sync = svc({
+      onMetric: () => {
+        throw new Error('sync metric sink down');
+      },
+      onMetricError: syncMetricError,
+    });
+    const syncKey = await sync.service.create({
+      tenantId: 't1',
+      name: 'sync',
+      scopes: [{ resource: 'r', level: 'read' }],
+    });
+
+    await expect(sync.service.verify(syncKey.key)).resolves.toMatchObject({ keyId: syncKey.id });
+    expect(syncMetricError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ outcome: 'success' }),
+    );
+
+    const asyncMetricError = jest.fn();
+    const asyncSink = svc({
+      onMetric: () => Promise.reject(new Error('async metric sink down')),
+      onMetricError: asyncMetricError,
+    });
+    const asyncKey = await asyncSink.service.create({
+      tenantId: 't1',
+      name: 'async',
+      scopes: [{ resource: 'r', level: 'read' }],
+    });
+
+    await expect(asyncSink.service.verify(asyncKey.key)).resolves.toMatchObject({
+      keyId: asyncKey.id,
+    });
+    await Promise.resolve();
+    expect(asyncMetricError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ outcome: 'success' }),
+    );
+  });
+
+  it('reports unexpected verification failures as error metrics', async () => {
+    class FailingLookupStorage extends InMemoryApiKeyStorage {
+      override async findByPrefix(): Promise<ApiKeyRecord | null> {
+        throw new Error('storage unavailable');
+      }
+    }
+
+    const metrics: ApiKeyVerificationMetric[] = [];
+    const service = new ApiKeysService({
+      storage: new FailingLookupStorage(),
+      hasher: new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 }),
+      namespace: 'nk',
+      onMetric: (metric) => {
+        metrics.push(metric);
+      },
+    });
+
+    await expect(service.verify(`nk_live_${'z'.repeat(12)}_${'z'.repeat(32)}`)).rejects.toThrow(
+      'storage unavailable',
+    );
+    expect(metrics).toEqual([
+      expect.objectContaining({
+        type: 'api_key.verification',
+        outcome: 'error',
+      }),
+    ]);
   });
 });
 

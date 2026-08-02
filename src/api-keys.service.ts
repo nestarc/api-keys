@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import {
   ApiKeyError,
   ApiKeyErrorCode,
@@ -6,14 +7,18 @@ import {
   ApiKeyOperationErrorCode,
 } from './errors';
 import { generateKey, parseKey } from './key-format';
+import { normalizeAllowedIpCidrs } from './ip-allowlist';
 import { flattenScopes } from './scope-matcher';
 import type { ApiKeyStorage } from './storage/api-key-storage.interface';
 import type {
   ApiKeyContext,
   ApiKeyEvent,
   ApiKeyEventSink,
+  ApiKeyMetricSink,
   ApiKeyTtlPolicy,
   ApiKeyRecord,
+  ApiKeyVerificationMetric,
+  ApiKeyVerificationOutcome,
   CreateApiKeyInput,
   CreateApiKeyResult,
   RotateApiKeyInput,
@@ -31,8 +36,11 @@ export interface ApiKeysServiceDeps {
   onAuthFailed?: (prefix: string | null, code: string) => void;
   onEvent?: ApiKeyEventSink;
   onEventError?: (error: unknown, event: ApiKeyEvent) => void;
+  onMetric?: ApiKeyMetricSink;
+  onMetricError?: (error: unknown, metric: ApiKeyVerificationMetric) => void;
   emitUsageEvents?: boolean;
   ttlPolicy?: ApiKeyTtlPolicy;
+  monotonicClock?: () => number;
 }
 
 export class ApiKeysService {
@@ -47,8 +55,11 @@ export class ApiKeysService {
   private readonly onAuthFailed: (prefix: string | null, code: string) => void;
   private readonly onEvent?: ApiKeyEventSink;
   private readonly onEventError?: (error: unknown, event: ApiKeyEvent) => void;
+  private readonly onMetric?: ApiKeyMetricSink;
+  private readonly onMetricError?: (error: unknown, metric: ApiKeyVerificationMetric) => void;
   private readonly emitUsageEvents: boolean;
   private readonly ttlPolicy?: ApiKeyTtlPolicy;
+  private readonly monotonicClock: () => number;
 
   constructor(deps: ApiKeysServiceDeps) {
     this.storage = deps.storage;
@@ -60,8 +71,11 @@ export class ApiKeysService {
     this.onAuthFailed = deps.onAuthFailed ?? (() => undefined);
     this.onEvent = deps.onEvent;
     this.onEventError = deps.onEventError;
+    this.onMetric = deps.onMetric;
+    this.onMetricError = deps.onMetricError;
     this.emitUsageEvents = deps.emitUsageEvents ?? false;
     this.ttlPolicy = deps.ttlPolicy;
+    this.monotonicClock = deps.monotonicClock ?? (() => performance.now());
   }
 
   async create(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
@@ -69,6 +83,7 @@ export class ApiKeysService {
     const scopes = flattenScopes(input.scopes);
     const now = this.clock();
     const expiresAt = this.resolveExpiresAt(input.expiresAt, now);
+    const allowedIpCidrs = normalizeAllowedIpCidrs(input.allowedIpCidrs);
 
     for (let attempt = 0; attempt < ApiKeysService.CREATE_MAX_ATTEMPTS; attempt += 1) {
       const generatedKey = generateKey({ namespace: this.namespace, environment });
@@ -83,6 +98,7 @@ export class ApiKeysService {
         hash: hashed.hash,
         pepperVersion: hashed.pepperVersion,
         scopes,
+        allowedIpCidrs,
         lastUsedAt: null,
         expiresAt,
         revokedAt: null,
@@ -123,74 +139,90 @@ export class ApiKeysService {
   }
 
   async verify(rawKey: string): Promise<ApiKeyContext> {
-    let parsedKey;
+    const startedAt = this.onMetric ? this.monotonicClock() : 0;
+    let metricEnvironment: ApiKeyContext['environment'] | undefined;
 
     try {
-      parsedKey = parseKey(rawKey);
-    } catch (error) {
-      this.reportAuthFailed(null, ApiKeyErrorCode.Malformed);
-      throw error;
-    }
+      let parsedKey;
 
-    if (parsedKey.namespace !== this.namespace) {
-      this.hasher.dummyVerify(parsedKey.secret);
-      this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid);
-      throw new ApiKeyError(ApiKeyErrorCode.Invalid);
-    }
+      try {
+        parsedKey = parseKey(rawKey);
+      } catch (error) {
+        this.reportAuthFailed(null, ApiKeyErrorCode.Malformed);
+        throw error;
+      }
 
-    const record = await this.storage.findByPrefix(parsedKey.prefix);
-    if (!record) {
-      this.hasher.dummyVerify(parsedKey.secret);
-      this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid);
-      throw new ApiKeyError(ApiKeyErrorCode.Invalid);
-    }
+      if (parsedKey.namespace !== this.namespace) {
+        this.hasher.dummyVerify(parsedKey.secret);
+        this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid);
+        throw new ApiKeyError(ApiKeyErrorCode.Invalid);
+      }
 
-    if (record.revokedAt !== null) {
-      this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Revoked, record);
-      throw new ApiKeyError(ApiKeyErrorCode.Revoked);
-    }
+      const record = await this.storage.findByPrefix(parsedKey.prefix);
+      if (!record) {
+        this.hasher.dummyVerify(parsedKey.secret);
+        this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid);
+        throw new ApiKeyError(ApiKeyErrorCode.Invalid);
+      }
+      metricEnvironment = record.environment;
 
-    if (record.expiresAt !== null && record.expiresAt.getTime() <= this.clock().getTime()) {
-      this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Expired, record);
-      throw new ApiKeyError(ApiKeyErrorCode.Expired);
-    }
+      if (record.revokedAt !== null) {
+        this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Revoked, record);
+        throw new ApiKeyError(ApiKeyErrorCode.Revoked);
+      }
 
-    let matches: boolean;
-    try {
-      matches = this.hasher.verify(parsedKey.secret, record.hash, record.pepperVersion);
-    } catch {
-      this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid, record);
-      throw new ApiKeyError(ApiKeyErrorCode.Invalid);
-    }
+      if (record.expiresAt !== null && record.expiresAt.getTime() <= this.clock().getTime()) {
+        this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Expired, record);
+        throw new ApiKeyError(ApiKeyErrorCode.Expired);
+      }
 
-    if (!matches) {
-      this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid, record);
-      throw new ApiKeyError(ApiKeyErrorCode.Invalid);
-    }
+      let matches: boolean;
+      try {
+        matches = this.hasher.verify(parsedKey.secret, record.hash, record.pepperVersion);
+      } catch {
+        this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid, record);
+        throw new ApiKeyError(ApiKeyErrorCode.Invalid);
+      }
 
-    // Usage tracking is intentionally best-effort. A concurrent revoke may still win
-    // after this verification and leave a later lastUsedAt update behind, which is
-    // acceptable because it is telemetry and must not block successful auth.
-    void this.scheduleTouch(record);
-    if (this.emitUsageEvents) {
-      this.emitEvent({
-        type: 'api_key.used',
-        at: this.clock(),
+      if (!matches) {
+        this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid, record);
+        throw new ApiKeyError(ApiKeyErrorCode.Invalid);
+      }
+
+      // Usage tracking is intentionally best-effort. A concurrent revoke may still win
+      // after this verification and leave a later lastUsedAt update behind, which is
+      // acceptable because it is telemetry and must not block successful auth.
+      void this.scheduleTouch(record);
+      if (this.emitUsageEvents) {
+        this.emitEvent({
+          type: 'api_key.used',
+          at: this.clock(),
+          keyId: record.id,
+          tenantId: record.tenantId,
+          prefix: record.prefix,
+          environment: record.environment,
+          scopes: record.scopes,
+        });
+      }
+
+      const apiKeyContext: ApiKeyContext = {
         keyId: record.id,
         tenantId: record.tenantId,
-        prefix: record.prefix,
         environment: record.environment,
         scopes: record.scopes,
-      });
+        prefix: record.prefix,
+        allowedIpCidrs: [...(record.allowedIpCidrs ?? [])],
+      };
+      this.recordVerificationMetric('success', startedAt, metricEnvironment);
+      return apiKeyContext;
+    } catch (error) {
+      this.recordVerificationMetric(
+        verificationOutcomeFromError(error),
+        startedAt,
+        metricEnvironment,
+      );
+      throw error;
     }
-
-    return {
-      keyId: record.id,
-      tenantId: record.tenantId,
-      environment: record.environment,
-      scopes: record.scopes,
-      prefix: record.prefix,
-    };
   }
 
   async revoke(id: string): Promise<void> {
@@ -232,6 +264,10 @@ export class ApiKeysService {
       oldRecord.expiresAt.getTime() < requestedGraceExpiresAt.getTime()
         ? oldRecord.expiresAt
         : requestedGraceExpiresAt;
+    const allowedIpCidrs =
+      input.allowedIpCidrs === undefined
+        ? [...(oldRecord.allowedIpCidrs ?? [])]
+        : normalizeAllowedIpCidrs(input.allowedIpCidrs);
 
     for (let attempt = 0; attempt < ApiKeysService.CREATE_MAX_ATTEMPTS; attempt += 1) {
       const generatedKey = generateKey({
@@ -248,6 +284,7 @@ export class ApiKeysService {
         hash: hashed.hash,
         pepperVersion: hashed.pepperVersion,
         scopes: [...oldRecord.scopes],
+        allowedIpCidrs,
         lastUsedAt: null,
         expiresAt: this.resolveExpiresAt(input.expiresAt, now, oldRecord.expiresAt),
         revokedAt: null,
@@ -390,6 +427,59 @@ export class ApiKeysService {
     } catch {
       // Event failure reporting must not break API key operations.
     }
+  }
+
+  private recordVerificationMetric(
+    outcome: ApiKeyVerificationOutcome,
+    startedAt: number,
+    environment?: ApiKeyContext['environment'],
+  ): void {
+    if (!this.onMetric) {
+      return;
+    }
+
+    const metric: ApiKeyVerificationMetric = {
+      type: 'api_key.verification',
+      outcome,
+      durationMs: Math.max(0, this.monotonicClock() - startedAt),
+      ...(environment ? { environment } : {}),
+    };
+
+    try {
+      const result = this.onMetric(metric);
+      if (result && typeof result === 'object' && 'then' in result) {
+        void result.catch((error: unknown) => this.handleMetricError(error, metric));
+      }
+    } catch (error) {
+      this.handleMetricError(error, metric);
+    }
+  }
+
+  private handleMetricError(error: unknown, metric: ApiKeyVerificationMetric): void {
+    try {
+      this.onMetricError?.(error, metric);
+    } catch {
+      // Metric failure reporting must not break API key operations.
+    }
+  }
+}
+
+function verificationOutcomeFromError(error: unknown): ApiKeyVerificationOutcome {
+  if (!(error instanceof ApiKeyError)) {
+    return 'error';
+  }
+
+  switch (error.code) {
+    case ApiKeyErrorCode.Malformed:
+      return 'malformed';
+    case ApiKeyErrorCode.Invalid:
+      return 'invalid';
+    case ApiKeyErrorCode.Revoked:
+      return 'revoked';
+    case ApiKeyErrorCode.Expired:
+      return 'expired';
+    default:
+      return 'error';
   }
 }
 

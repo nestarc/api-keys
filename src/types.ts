@@ -18,6 +18,7 @@ export interface ApiKeyRecord {
   hash: string;
   pepperVersion: number;
   scopes: string[];
+  allowedIpCidrs?: string[];
   lastUsedAt: Date | null;
   expiresAt: Date | null;
   revokedAt: Date | null;
@@ -33,6 +34,7 @@ export interface ApiKeyContext {
   environment: Environment;
   scopes: string[];
   prefix: string;
+  allowedIpCidrs?: string[];
 }
 
 export interface CreateApiKeyInput {
@@ -42,6 +44,7 @@ export interface CreateApiKeyInput {
   scopes: Scope[];
   expiresAt?: Date;
   createdBy?: string;
+  allowedIpCidrs?: string[];
 }
 
 export interface CreateApiKeyResult {
@@ -54,6 +57,7 @@ export interface RotateApiKeyInput {
   name?: string;
   createdBy?: string;
   expiresAt?: Date | null;
+  allowedIpCidrs?: string[];
 }
 
 export interface RotateApiKeyResult {
@@ -124,6 +128,23 @@ export type ApiKeyEvent =
   | ApiKeyUsedEvent;
 
 export type ApiKeyEventSink = (event: ApiKeyEvent) => void | Promise<void>;
+
+export type ApiKeyVerificationOutcome =
+  | 'success'
+  | 'malformed'
+  | 'invalid'
+  | 'revoked'
+  | 'expired'
+  | 'error';
+
+export interface ApiKeyVerificationMetric {
+  type: 'api_key.verification';
+  outcome: ApiKeyVerificationOutcome;
+  durationMs: number;
+  environment?: Environment;
+}
+
+export type ApiKeyMetricSink = (metric: ApiKeyVerificationMetric) => void | Promise<void>;
 
 export interface ApiKeyTtlPolicy {
   defaultExpiresInMs?: number;

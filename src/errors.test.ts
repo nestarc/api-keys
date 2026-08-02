@@ -14,6 +14,12 @@ describe('ApiKeyError', () => {
     expect(err.httpStatus).toBe(403);
   });
 
+  it('IP allowlist mismatch maps to 403', () => {
+    const err = new ApiKeyError(ApiKeyErrorCode.IpNotAllowed);
+
+    expect(err.httpStatus).toBe(403);
+  });
+
   it('preserves an optional reason', () => {
     const err = new ApiKeyError(ApiKeyErrorCode.Malformed, 'bad prefix');
 

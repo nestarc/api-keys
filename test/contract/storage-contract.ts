@@ -21,6 +21,7 @@ function fixture(overrides: Partial<ApiKeyRecord> = {}): ApiKeyRecord {
     hash: 'f'.repeat(64),
     pepperVersion: 1,
     scopes: ['invoices:read'],
+    allowedIpCidrs: ['203.0.113.0/24'],
     lastUsedAt: null,
     expiresAt: null,
     revokedAt: null,
@@ -47,6 +48,7 @@ export function storageContract(name: string, factory: () => ApiKeyStorage): voi
 
       const found = await storage.findByPrefix(record.prefix);
       expect(found?.id).toBe('key_1');
+      expect(found?.allowedIpCidrs).toEqual(['203.0.113.0/24']);
     });
 
     it('findByPrefix returns null when absent', async () => {

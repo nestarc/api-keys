@@ -2,6 +2,8 @@ export * from './types';
 export * from './errors';
 export * from './scope-matcher';
 export * from './context';
+export * from './ip-allowlist';
+export * from './testing';
 export { API_KEY_REDACT_REGEX, generateKey, parseKey } from './key-format';
 export { Sha256Hasher } from './hasher';
 export type { HashedSecret, HasherOptions } from './hasher';

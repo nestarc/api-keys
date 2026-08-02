@@ -10,10 +10,16 @@ import { CurrentApiKey } from '../../src/decorators/current-api-key.decorator';
 import { ENVIRONMENT_METADATA } from '../../src/decorators/require-environment.decorator';
 import { SCOPE_METADATA } from '../../src/decorators/require-scope.decorator';
 import { Sha256Hasher } from '../../src/hasher';
+import type { ApiKeyClientIpResolver } from '../../src/ip-allowlist';
 import { InMemoryApiKeyStorage } from '../../src/storage/in-memory-storage';
 import type { ApiKeyContext } from '../../src/types';
 
-function setup(contextWriter?: (apiKey: ApiKeyContext, request: unknown) => void | Promise<void>) {
+function setup(
+  options: {
+    contextWriter?: (apiKey: ApiKeyContext, request: unknown) => void | Promise<void>;
+    clientIpResolver?: ApiKeyClientIpResolver;
+  } = {},
+) {
   const storage = new InMemoryApiKeyStorage();
   const hasher = new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 });
   const service = new ApiKeysService({ storage, hasher, namespace: 'nk' });
@@ -23,9 +29,10 @@ function setup(contextWriter?: (apiKey: ApiKeyContext, request: unknown) => void
       service: ApiKeysService,
       reflector: Reflector,
       contextWriter?: (apiKey: ApiKeyContext, request: unknown) => void | Promise<void>,
+      clientIpResolver?: ApiKeyClientIpResolver,
     ): ApiKeysGuard;
   };
-  const guard = new GuardCtor(service, reflector, contextWriter);
+  const guard = new GuardCtor(service, reflector, options.contextWriter, options.clientIpResolver);
 
   return { guard, service, reflector };
 }
@@ -34,8 +41,9 @@ function ctx(
   headers: Record<string, string>,
   handler = () => undefined,
   cls = class {},
+  requestOverrides: Record<string, unknown> = {},
 ): ExecutionContext {
-  const req: Record<string, unknown> = { headers };
+  const req: Record<string, unknown> = { headers, ...requestOverrides };
 
   return {
     switchToHttp: () => ({ getRequest: () => req }),
@@ -115,7 +123,7 @@ describe('ApiKeysGuard', () => {
 
   it('runs contextWriter only after scope and environment checks pass', async () => {
     const contextWriter = jest.fn();
-    const { guard, service, reflector } = setup(contextWriter);
+    const { guard, service, reflector } = setup({ contextWriter });
     const { key } = await service.create({
       tenantId: 't1',
       name: 'x',
@@ -150,5 +158,46 @@ describe('ApiKeysGuard', () => {
       code: 'api_key_environment_mismatch',
     });
     expect(contextWriter).not.toHaveBeenCalled();
+  });
+
+  it('enforces a key IP allowlist using request.ip by default', async () => {
+    const { guard, service } = setup();
+    const { key } = await service.create({
+      tenantId: 't1',
+      name: 'restricted',
+      scopes: [{ resource: 'reports', level: 'read' }],
+      allowedIpCidrs: ['203.0.113.0/24'],
+    });
+
+    await expect(
+      guard.canActivate(
+        ctx({ authorization: `Bearer ${key}` }, () => undefined, class {}, { ip: '203.0.113.42' }),
+      ),
+    ).resolves.toBe(true);
+
+    await expect(
+      guard.canActivate(
+        ctx({ authorization: `Bearer ${key}` }, () => undefined, class {}, { ip: '198.51.100.1' }),
+      ),
+    ).rejects.toMatchObject({ code: 'api_key_ip_not_allowed', httpStatus: 403 });
+
+    await expect(guard.canActivate(ctx({ authorization: `Bearer ${key}` }))).rejects.toMatchObject({
+      code: 'api_key_ip_not_allowed',
+    });
+  });
+
+  it('supports a custom clientIpResolver', async () => {
+    const clientIpResolver = jest.fn().mockResolvedValue('2001:db8::42');
+    const { guard, service } = setup({ clientIpResolver });
+    const { key } = await service.create({
+      tenantId: 't1',
+      name: 'restricted',
+      scopes: [{ resource: 'reports', level: 'read' }],
+      allowedIpCidrs: ['2001:db8::/48'],
+    });
+    const executionContext = ctx({ authorization: `Bearer ${key}` });
+
+    await expect(guard.canActivate(executionContext)).resolves.toBe(true);
+    expect(clientIpResolver).toHaveBeenCalledWith(executionContext.switchToHttp().getRequest());
   });
 });

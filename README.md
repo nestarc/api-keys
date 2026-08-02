@@ -17,6 +17,8 @@ Secure, tenant-scoped API keys for NestJS + Prisma. SHA-256 hashed, Stripe-style
 - **Lifecycle hooks** — creation, revocation, rotation, auth-failure, and opt-in usage events with audit-safe payloads.
 - **Stable request context** — `@CurrentApiKey()`, `getApiKeyContext()`, and an optional `contextWriter` bridge.
 - **TTL policy** — optional default expiration, maximum expiration, and no-never-expires enforcement.
+- **Per-key IP allowlists** — exact IPv4/IPv6 addresses and CIDR ranges with fail-closed enforcement.
+- **Verification metrics** — low-cardinality success/failure and latency measurements through a pluggable sink.
 - **Pluggable storage** — ships with Prisma and in-memory adapters plus a reusable contract suite.
 - **NestJS-native** — `ApiKeysModule.forRoot`, `ApiKeysGuard`, `@RequireScope`, `@RequireEnvironment`.
 - **Typed errors** — `ApiKeyError` with stable `code` values mapped to HTTP statuses.
@@ -81,6 +83,7 @@ const { id, key } = await apiKeys.create({
   tenantId: 'tenant_123',
   name: 'Primary',
   scopes: [{ resource: 'reports', level: 'read' }],
+  allowedIpCidrs: ['203.0.113.0/24'], // optional
 });
 // key is returned ONCE; show it to the user and discard.
 ```
@@ -108,6 +111,38 @@ publish() {
 ```
 
 Use `test` keys in staging and customer sandbox traffic so a leaked test key can never charge a live account.
+
+## IP allowlists
+
+Restrict a key to exact IPv4/IPv6 addresses or CIDR ranges with `allowedIpCidrs`:
+
+```typescript
+const { key } = await apiKeys.create({
+  tenantId: 'tenant_123',
+  name: 'Office integration',
+  scopes: [{ resource: 'reports', level: 'read' }],
+  allowedIpCidrs: ['203.0.113.42', '10.20.0.0/16', '2001:db8::/48'],
+});
+```
+
+Exact addresses are stored as `/32` or `/128`; CIDRs are normalized and deduplicated.
+Missing or empty allowlists are unrestricted. A restricted key used from another address,
+or without a resolvable client IP, fails with `api_key_ip_not_allowed`.
+
+The default resolver reads `request.ip` and never trusts `X-Forwarded-For` directly. Configure
+your NestJS HTTP adapter's proxy trust correctly, or provide a resolver for your infrastructure:
+
+```typescript
+ApiKeysModule.forRoot({
+  namespace: 'acme',
+  peppers: { 1: process.env.API_KEY_PEPPER! },
+  storage,
+  clientIpResolver: (request) => {
+    const req = request as { verifiedClientIp?: string };
+    return req.verifiedClientIp;
+  },
+});
+```
 
 ## Pepper rotation
 
@@ -142,6 +177,9 @@ const replacement = await apiKeys.rotate(keyId, {
 ```
 
 The replacement keeps the old key's tenant, environment, scopes, and expiration unless you override them. The old key is not revoked; it receives `rotatedAt`, `replacedByKeyId`, and an `expiresAt` equal to the grace deadline. If the old key already expires earlier, the earlier expiration wins.
+
+The replacement also preserves `allowedIpCidrs` by default. Pass a new array to replace the
+allowlist or `allowedIpCidrs: []` to make the replacement unrestricted.
 
 ## Revoking and listing keys
 
@@ -179,6 +217,63 @@ ApiKeysModule.forRoot({
 
 For tenancy or RLS integration, pass `contextWriter` and write the verified `ApiKeyContext` into your own request-local context after scope and environment checks pass.
 
+## Verification metrics
+
+`onMetric` emits one bounded-cardinality measurement for each `verify()` call. Payloads contain
+only `outcome`, `durationMs`, and an optional `environment`; key IDs, tenant IDs, prefixes,
+scopes, client IPs, and raw key material are excluded.
+
+```typescript
+ApiKeysModule.forRoot({
+  namespace: 'acme',
+  peppers: { 1: process.env.API_KEY_PEPPER! },
+  storage,
+  onMetric: (metric) => {
+    apiKeyVerificationCounter.add(1, {
+      outcome: metric.outcome,
+      environment: metric.environment ?? 'unknown',
+    });
+    apiKeyVerificationDuration.record(metric.durationMs, {
+      outcome: metric.outcome,
+    });
+  },
+  onMetricError: (error, metric) => {
+    logger.warn({ error, outcome: metric.outcome }, 'API key metric sink failed');
+  },
+});
+```
+
+Metric sink failures are isolated from authentication. Use lifecycle events rather than metric
+labels when you need per-key audit details.
+
+## RBAC integration
+
+`@nestarc/rbac` maps the context written by `ApiKeysGuard` to an `api_key` subject:
+
+```typescript
+import { RbacModule } from '@nestarc/rbac';
+import { createApiKeySubjectResolver } from '@nestarc/rbac/integrations/api-keys';
+
+RbacModule.forRoot({
+  storage: rbacStorage,
+  subjectResolver: createApiKeySubjectResolver(),
+  tenant: { requiredByDefault: true },
+});
+```
+
+Run the authentication guard before RBAC:
+
+```typescript
+@UseGuards(ApiKeysGuard, RbacGuard)
+@RequireScope('reports', 'read')
+@Can('reports.read', { tenant: 'required' })
+@Get()
+listReports() {}
+```
+
+`@RequireScope()` checks capabilities embedded in the key. RBAC `@Can()` checks role bindings
+for that API key ID. When both decorators are present, both checks must pass.
+
 ## Errors
 
 Verification and authorization failures throw `ApiKeyError` with a stable `code`:
@@ -192,6 +287,7 @@ Verification and authorization failures throw `ApiKeyError` with a stable `code`
 | `api_key_expired` | 401 | Key is past `expiresAt` |
 | `api_key_environment_mismatch` | 403 | Key environment doesn't match route |
 | `api_key_scope_insufficient` | 403 | Key is missing a required scope |
+| `api_key_ip_not_allowed` | 403 | Resolved client IP is outside the key allowlist |
 
 Use these codes (not messages) to branch in client code or structured logs.
 
@@ -209,16 +305,34 @@ export function redactApiKeys(value: string): string {
 }
 ```
 
+## Testing
+
+`createTestKey()` issues and verifies a key through the public service API. Defaults use a test
+environment, `tenant_test`, and `test:write` scope:
+
+```typescript
+import { createTestKey } from '@nestarc/api-keys';
+
+const fixture = await createTestKey(apiKeys, {
+  tenantId: 'tenant_fixture',
+  scopes: [{ resource: 'reports', level: 'read' }],
+});
+
+expect(fixture.context.tenantId).toBe('tenant_fixture');
+request(app).get('/reports').set('Authorization', `Bearer ${fixture.key}`);
+```
+
 ## Docs
 
 - [`docs/prd.md`](docs/prd.md) Product requirements
 - [`docs/spec.md`](docs/spec.md) Technical spec
 - [`docs/spec-0.2.md`](docs/spec-0.2.md) v0.2 technical spec
+- [`docs/spec-0.3.md`](docs/spec-0.3.md) v0.3 technical spec
 - [`CHANGELOG.md`](CHANGELOG.md) Release history
 
 ## Contributing
 
-CI runs `lint`, `test`, and `build` on Node 20 and 22 for every PR. Releases are tag-driven: `npm version <bump> && git push --tags` triggers the workflow in [`.github/workflows/release.yml`](.github/workflows/release.yml), which publishes to npm with provenance. Pre-release versions (anything with a `-` in the version) are published under the `next` dist-tag.
+CI runs `lint`, `test`, `build`, and a bounded benchmark smoke check on Node 20 and 22 for every PR. Releases are tag-driven: `npm version <bump> && git push --tags` triggers the workflow in [`.github/workflows/release.yml`](.github/workflows/release.yml), which publishes to npm with provenance. Pre-release versions (anything with a `-` in the version) are published under the `next` dist-tag.
 
 ## License
 

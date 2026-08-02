@@ -10,6 +10,31 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ## [Unreleased]
 
+### Added
+
+- Per-key IPv4, IPv6, and CIDR allowlists through `allowedIpCidrs`.
+- Injectable `clientIpResolver` with a safe `request.ip` default.
+- Low-cardinality `api_key.verification` metrics through `onMetric` and
+  isolated failure reporting through `onMetricError`.
+- `createTestKey()` for consumer integration tests.
+- `@nestarc/rbac` compatibility coverage and a v0.3 technical specification.
+
+### Changed
+
+- The Prisma example schema now includes `allowedIpCidrs String[] @default([])`.
+- CI now runs a bounded benchmark smoke check.
+
+### Fixed
+
+- Updated the benchmark storage adapter for the v0.2 `findById()` and `rotate()`
+  contract so the benchmark compiles and runs again.
+
+### Security
+
+- IP restrictions fail closed when a restricted key has no valid resolved client IP.
+- Verification metrics exclude raw keys, hashes, peppers, prefixes, key IDs, tenant IDs,
+  scopes, client IPs, and route paths.
+
 ## [0.2.0] - 2026-06-18
 
 ### Added

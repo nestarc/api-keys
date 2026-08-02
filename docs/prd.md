@@ -14,7 +14,7 @@ Clerk, Auth0, Better-Auth는 **end-user authentication**에 집중하고 있어 
 
 ## 2. 해결 방향
 
-nestarc의 기존 축(`tenancy`, `audit-log`, `access-control` 예정)과 자연스럽게 결합되는 **프로덕션 레디 API key primitive**를 제공한다. "Stripe처럼 동작하는 셀프호스트 API key"를 한 줄 포지셔닝으로 잡는다.
+nestarc의 기존 축(`tenancy`, `audit-log`, `rbac`)과 자연스럽게 결합되는 **프로덕션 레디 API key primitive**를 제공한다. "Stripe처럼 동작하는 셀프호스트 API key"를 한 줄 포지셔닝으로 잡는다.
 
 ## 3. 타깃 사용자
 
@@ -49,6 +49,13 @@ nestarc의 기존 축(`tenancy`, `audit-log`, `access-control` 예정)과 자연
 - TTL policy: 기본 만료, 최대 만료, 무기한 키 금지 옵션
 - v0.1 문서와 테스트 정렬
 
+### 포함 (v0.3)
+- 키별 IPv4/IPv6/CIDR allowlist와 주입 가능한 client IP resolver
+- 저카디널리티 API key 검증 메트릭 hook
+- `@nestarc/rbac` API key subject 연동 문서와 호환성 테스트
+- `createTestKey()` consumer 테스트 helper
+- verification benchmark 복구와 CI smoke 검증
+
 ### 제외
 - OAuth, JWT 세션, end-user 로그인 (Clerk/Auth0/better-auth 영역)
 - 관리 UI (headless 유지)
@@ -77,7 +84,7 @@ nestarc의 기존 축(`tenancy`, `audit-log`, `access-control` 예정)과 자연
 ## 8. 의존성과 연결
 
 - 필수: `@prisma/client`, `@nestjs/common`
-- 선택: `@nestarc/tenancy` (권장), `@nestarc/audit-log` (권장), `@nestarc/access-control` (후속)
+- 선택: `@nestarc/tenancy` (권장), `@nestarc/audit-log` (권장), `@nestarc/rbac` (권장)
 - 런타임: Node 20+, PostgreSQL 14+
 
 ## 9. 로드맵
@@ -98,17 +105,21 @@ nestarc의 기존 축(`tenancy`, `audit-log`, `access-control` 예정)과 자연
 - tenancy/audit-log bridge recipe를 위한 `contextWriter`
 
 **v0.3**
-- `@nestarc/access-control` adapter
-- argon2 해싱 옵션
 - IP allowlist per key
-- 사용량 메트릭 내보내기
-- Redis verification cache 검토
+- 저카디널리티 verification metrics hook
+- `@nestarc/rbac` integration contract와 recipe
+- `createTestKey()` testing helper
+- benchmark/CI 정렬
+
+**후속 검토**
+- Redis verification cache는 분산 invalidation contract 확정 후 검토
+- argon2는 지원 Node baseline과 hash-algorithm migration 필요성이 생길 때 재검토
 
 ## 10. 리스크와 대응
 
 | 리스크 | 대응 |
 |---|---|
-| SHA-256 + pepper 유출 시 오프라인 공격 | pepper rotation 가이드 제공, v0.3에 argon2 옵션 |
+| SHA-256 + pepper 유출 시 오프라인 공격 | 128비트 이상 랜덤 secret과 pepper rotation을 유지하고 hashing algorithm 변경은 별도 위협 모델로 검토 |
 | 사용자가 평문 키를 로깅 | logger redact 미들웨어 제공, README 명시 |
-| Scope 모델이 Stripe 모델로 굳어 access-control과 충돌 | adapter 패턴으로 분리, scope string은 내부 표현 |
+| Scope 모델과 RBAC permission의 의미가 혼동 | API key scope와 `@nestarc/rbac` role binding을 독립된 authorization layer로 문서화 |
 | test/live 혼용 사고 | 키 검증 시 환경 불일치를 별도 에러 코드로 노출 |

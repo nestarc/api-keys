@@ -92,5 +92,7 @@ function mapRow(row: ApiKeyRecord): ApiKeyRecord {
   return {
     ...row,
     environment: row.environment as Environment,
+    scopes: [...row.scopes],
+    allowedIpCidrs: [...(row.allowedIpCidrs ?? [])],
   };
 }

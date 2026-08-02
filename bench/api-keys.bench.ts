@@ -52,6 +52,11 @@ class BalancedInMemoryStorage implements ApiKeyStorage {
     return record ? { ...record } : null;
   }
 
+  async findById(id: string): Promise<ApiKeyRecord | null> {
+    const record = this.byId.get(id);
+    return record ? { ...record } : null;
+  }
+
   async listByTenant(tenantId: string, opts: { includeRevoked?: boolean } = {}): Promise<ApiKeyRecord[]> {
     const out: ApiKeyRecord[] = [];
     for (const record of this.byId.values()) {
@@ -73,6 +78,30 @@ class BalancedInMemoryStorage implements ApiKeyStorage {
     if (!record) return;
     record.lastUsedAt = at;
   }
+
+  async rotate(input: {
+    oldKeyId: string;
+    newRecord: ApiKeyRecord;
+    oldExpiresAt: Date;
+    rotatedAt: Date;
+  }): Promise<void> {
+    const oldRecord = this.byId.get(input.oldKeyId);
+    if (!oldRecord) throw new Error(`not found: ${input.oldKeyId}`);
+    if (this.byId.has(input.newRecord.id)) {
+      throw new Error(`duplicate id: ${input.newRecord.id}`);
+    }
+    if (this.byPrefix.has(input.newRecord.prefix)) {
+      throw new Error(`duplicate prefix: ${input.newRecord.prefix}`);
+    }
+
+    oldRecord.expiresAt = input.oldExpiresAt;
+    oldRecord.rotatedAt = input.rotatedAt;
+    oldRecord.replacedByKeyId = input.newRecord.id;
+
+    const snapshot = { ...input.newRecord };
+    this.byId.set(snapshot.id, snapshot);
+    this.byPrefix.set(snapshot.prefix, snapshot);
+  }
 }
 
 // ── CLI args ──────────────────────────────────────────────────────────
@@ -83,6 +112,7 @@ function flag(name: string, fallback: string): string {
 }
 const ITERATIONS = Number(flag('iterations', '5000'));
 const WARMUP = Number(flag('warmup', '500'));
+const TIMING_THRESHOLD_MS = Number(flag('timing-threshold-ms', '0.05'));
 
 // ── Stats ─────────────────────────────────────────────────────────────
 interface Stats {
@@ -235,7 +265,6 @@ async function run() {
 
   // Timing-safe validation.
   const deltaP50 = Math.abs(happyStats.p50 - invalidStats.p50);
-  const TIMING_THRESHOLD_MS = 0.05; // 50µs — tight enough to catch SHA-256 + one DB lookup worth of difference
   const deltaPct = (deltaP50 / happyStats.p50) * 100;
 
   console.log(`\n  Timing-safe check`);

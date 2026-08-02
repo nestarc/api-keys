@@ -12,6 +12,12 @@ import {
   SCOPE_METADATA,
 } from './decorators/require-scope.decorator';
 import { ApiKeyError, ApiKeyErrorCode } from './errors';
+import {
+  API_KEY_CLIENT_IP_RESOLVER,
+  ApiKeyClientIpResolver,
+  defaultApiKeyClientIpResolver,
+  isIpAllowed,
+} from './ip-allowlist';
 import { scopeSatisfies } from './scope-matcher';
 import type { Environment } from './types';
 
@@ -25,6 +31,9 @@ export class ApiKeysGuard implements CanActivate {
     @Optional()
     @Inject(API_KEY_CONTEXT_WRITER)
     private readonly contextWriter?: ApiKeyContextWriter,
+    @Optional()
+    @Inject(API_KEY_CLIENT_IP_RESOLVER)
+    private readonly clientIpResolver?: ApiKeyClientIpResolver,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -47,6 +56,14 @@ export class ApiKeysGuard implements CanActivate {
     );
     if (requiredEnvironment && apiKeyContext.environment !== requiredEnvironment) {
       throw new ApiKeyError(ApiKeyErrorCode.EnvironmentMismatch);
+    }
+
+    const allowedIpCidrs = apiKeyContext.allowedIpCidrs ?? [];
+    if (allowedIpCidrs.length > 0) {
+      const clientIp = await (this.clientIpResolver ?? defaultApiKeyClientIpResolver)(request);
+      if (!isIpAllowed(clientIp, allowedIpCidrs)) {
+        throw new ApiKeyError(ApiKeyErrorCode.IpNotAllowed);
+      }
     }
 
     const requiredScope = this.reflector.getAllAndOverride<RequiredScope | undefined>(

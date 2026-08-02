@@ -18,6 +18,7 @@ model ApiKey {
   hash            String
   pepperVersion   Int       @default(1)
   scopes          String[]
+  allowedIpCidrs  String[]  @default([])
   lastUsedAt      DateTime?
   expiresAt       DateTime?
   revokedAt       DateTime?
