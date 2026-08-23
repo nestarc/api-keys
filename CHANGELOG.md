@@ -10,6 +10,21 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-23
+
+### Added
+
+- PostgreSQL-backed `PrismaApiKeyStorage` contract coverage for CRUD, tenant isolation,
+  field mapping, rotation, and transaction rollback.
+- Prisma 5.22.0/6.19.3 CI and pre-release verification with matching CLI/client versions.
+- A tarball-based strict consumer install test using Prisma 6.19.3 without peer-dependency
+  bypass flags.
+
+### Changed
+
+- Expanded the optional `@prisma/client` peer range from Prisma 5 to
+  `^5.0.0 || ^6.0.0` based on the real-client PostgreSQL matrix.
+
 ## [0.3.0] - 2026-08-02
 
 ### Added

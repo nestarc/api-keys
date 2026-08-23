@@ -1,0 +1,32 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../test/e2e/generated/prisma-client"
+}
+
+model ApiKey {
+  id              String    @id
+  tenantId        String
+  name            String
+  environment     String
+  prefix          String    @unique
+  hash            String
+  pepperVersion   Int       @default(1)
+  scopes          String[]
+  allowedIpCidrs  String[]  @default([])
+  lastUsedAt      DateTime?
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  rotatedAt       DateTime?
+  replacedByKeyId String?
+  createdBy       String?
+  createdAt       DateTime  @default(now())
+
+  @@index([tenantId, environment])
+  @@index([tenantId, revokedAt])
+  @@index([replacedByKeyId])
+}

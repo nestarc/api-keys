@@ -29,6 +29,11 @@ Secure, tenant-scoped API keys for NestJS + Prisma. SHA-256 hashed, Stripe-style
 npm install @nestarc/api-keys
 ```
 
+`@prisma/client` is an optional peer dependency. The Prisma storage adapter is verified with
+Prisma 5.22.0 and 6.19.3 and declares support for `^5.0.0 || ^6.0.0`. Prisma 7 is not yet in
+the supported range. Consumers that use the in-memory adapter or a custom storage adapter do
+not need to install Prisma.
+
 ## Quickstart
 
 ```typescript
@@ -58,12 +63,7 @@ Use a product-specific `namespace` such as `acme` or `billing` instead of relyin
 
 ```typescript
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import {
-  ApiKeyContext,
-  ApiKeysGuard,
-  CurrentApiKey,
-  RequireScope,
-} from '@nestarc/api-keys';
+import { ApiKeyContext, ApiKeysGuard, CurrentApiKey, RequireScope } from '@nestarc/api-keys';
 
 @Controller('reports')
 @UseGuards(ApiKeysGuard)
@@ -184,8 +184,8 @@ allowlist or `allowedIpCidrs: []` to make the replacement unrestricted.
 ## Revoking and listing keys
 
 ```typescript
-await apiKeys.revoke(keyId);                                 // soft-delete: sets revokedAt, verification returns api_key_revoked
-const active = await apiKeys.list('tenant_123');             // active keys only
+await apiKeys.revoke(keyId); // soft-delete: sets revokedAt, verification returns api_key_revoked
+const active = await apiKeys.list('tenant_123'); // active keys only
 const all = await apiKeys.list('tenant_123', { includeRevoked: true });
 ```
 
@@ -278,16 +278,16 @@ for that API key ID. When both decorators are present, both checks must pass.
 
 Verification and authorization failures throw `ApiKeyError` with a stable `code`:
 
-| Code | HTTP | Meaning |
-| --- | --- | --- |
-| `api_key_missing` | 401 | No key on the request |
-| `api_key_malformed` | 401 | Key doesn't match the expected format |
-| `api_key_invalid` | 401 | Key not found or secret mismatch |
-| `api_key_revoked` | 401 | Key was revoked |
-| `api_key_expired` | 401 | Key is past `expiresAt` |
-| `api_key_environment_mismatch` | 403 | Key environment doesn't match route |
-| `api_key_scope_insufficient` | 403 | Key is missing a required scope |
-| `api_key_ip_not_allowed` | 403 | Resolved client IP is outside the key allowlist |
+| Code                           | HTTP | Meaning                                         |
+| ------------------------------ | ---- | ----------------------------------------------- |
+| `api_key_missing`              | 401  | No key on the request                           |
+| `api_key_malformed`            | 401  | Key doesn't match the expected format           |
+| `api_key_invalid`              | 401  | Key not found or secret mismatch                |
+| `api_key_revoked`              | 401  | Key was revoked                                 |
+| `api_key_expired`              | 401  | Key is past `expiresAt`                         |
+| `api_key_environment_mismatch` | 403  | Key environment doesn't match route             |
+| `api_key_scope_insufficient`   | 403  | Key is missing a required scope                 |
+| `api_key_ip_not_allowed`       | 403  | Resolved client IP is outside the key allowlist |
 
 Use these codes (not messages) to branch in client code or structured logs.
 
@@ -332,7 +332,17 @@ request(app).get('/reports').set('Authorization', `Bearer ${fixture.key}`);
 
 ## Contributing
 
-CI runs `lint`, `test`, `build`, and a bounded benchmark smoke check on Node 20 and 22 for every PR. Releases are tag-driven: `npm version <bump> && git push --tags` triggers the workflow in [`.github/workflows/release.yml`](.github/workflows/release.yml), which publishes to npm with provenance. Pre-release versions (anything with a `-` in the version) are published under the `next` dist-tag.
+CI runs `lint`, `test`, `build`, and a bounded benchmark smoke check on Node 20 and 22 for every
+PR. It also runs the PostgreSQL storage contract against matching Prisma CLI/client versions
+5.22.0 and 6.19.3. Run that contract locally with `npm run test:e2e:prisma`; the runner uses
+`PRISMA_E2E_DATABASE_URL` when supplied, otherwise it starts a disposable PostgreSQL 16 Docker
+container. `npm run test:consumer:strict` packs the library and verifies an independent Prisma
+6.19.3 consumer installation without `--legacy-peer-deps` or `--force`.
+
+Releases are tag-driven: `npm version <bump> && git push --tags` triggers the workflow in
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which repeats the Prisma matrix
+before publishing to npm with provenance. Pre-release versions (anything with a `-` in the
+version) are published under the `next` dist-tag.
 
 ## License
 
