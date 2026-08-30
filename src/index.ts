@@ -17,6 +17,7 @@ export type {
   ApiKeyStorage,
   ListApiKeysOptions,
   RotateApiKeyStorageInput,
+  RotateApiKeyStorageResult,
 } from './storage/api-key-storage.interface';
 export { InMemoryApiKeyStorage } from './storage/in-memory-storage';
 export { PrismaApiKeyStorage } from './storage/prisma-storage';

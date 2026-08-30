@@ -198,6 +198,29 @@ The replacement keeps the old key's tenant, environment, scopes, and expiration 
 The replacement also preserves `allowedIpCidrs` by default. Pass a new array to replace the
 allowlist or `allowedIpCidrs: []` to make the replacement unrestricted.
 
+Concurrent calls for the same old key are exactly-once: one call returns a replacement and every
+loser throws `ApiKeyOperationError` with `api_key_not_rotatable`. The Prisma adapter enforces this
+with a PostgreSQL transaction and conditional update, so an unlinked replacement is never stored.
+
+### Custom storage rotation contract
+
+Starting with the next pre-1.0 minor release (`0.4.0`), custom `ApiKeyStorage` adapters must make
+the old-key claim and replacement insert one atomic operation. `rotate()` must check that the old
+record is unrevoked, unrotated, unreplaced, and unexpired as of `input.rotatedAt`, then return
+`'rotated'` or `'not_rotatable'`:
+
+```typescript
+type RotateApiKeyStorageResult = 'rotated' | 'not_rotatable';
+
+rotate(input: RotateApiKeyStorageInput): Promise<RotateApiKeyStorageResult>;
+```
+
+Do not implement this as `findById()` followed by separate update and insert calls. SQL adapters
+should use a transaction plus a conditional update/CAS and roll the claim back if insertion fails.
+Legacy adapters returning `Promise<void>` now fail fast instead of being treated as a successful
+rotation. This public interface change is intentionally shipped as pre-1.0 minor `0.4.0`, not a
+`0.3.x` patch; custom adapter authors must update before upgrading.
+
 ## Revoking and listing keys
 
 ```typescript

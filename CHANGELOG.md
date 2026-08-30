@@ -18,6 +18,15 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 - Make `ApiKeyError` a Nest `HttpException` so the default Nest 10/11 HTTP pipeline returns the
   documented 401/403 status and a safe `{ statusCode, code }` response body. The existing
   `instanceof ApiKeyError`, `code`, and `httpStatus` contracts remain supported.
+- Make rotation an exactly-once atomic CAS: concurrent attempts for one old key now produce one
+  linked replacement while every loser returns the stable `api_key_not_rotatable` operation error.
+  `PrismaApiKeyStorage` uses an interactive transaction with a conditional PostgreSQL update.
+
+### Changed
+
+- **Breaking in the planned pre-1.0 `0.4.0` release:** custom `ApiKeyStorage.rotate()`
+  implementations must atomically return `'rotated'` or `'not_rotatable'`. Legacy `Promise<void>`
+  adapters fail fast and must migrate; this change will not be published as a `0.3.x` patch.
 
 ## [0.3.2] - 2026-08-30
 

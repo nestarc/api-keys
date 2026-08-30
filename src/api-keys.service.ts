@@ -252,6 +252,7 @@ export class ApiKeysService {
     const now = this.clock();
     if (
       oldRecord.revokedAt !== null ||
+      oldRecord.rotatedAt !== null ||
       oldRecord.replacedByKeyId !== null ||
       (oldRecord.expiresAt !== null && oldRecord.expiresAt.getTime() <= now.getTime())
     ) {
@@ -295,12 +296,20 @@ export class ApiKeysService {
       };
 
       try {
-        await this.storage.rotate({
+        const rotationResult = await this.storage.rotate({
           oldKeyId: oldRecord.id,
           newRecord,
           oldExpiresAt,
           rotatedAt: now,
         });
+        if (rotationResult === 'not_rotatable') {
+          throw new ApiKeyOperationError(ApiKeyOperationErrorCode.NotRotatable);
+        }
+        if (rotationResult !== 'rotated') {
+          throw new Error(
+            'ApiKeyStorage.rotate() must atomically return "rotated" or "not_rotatable"',
+          );
+        }
       } catch (error) {
         if (isDuplicatePrefixError(error) && attempt < ApiKeysService.CREATE_MAX_ATTEMPTS - 1) {
           continue;

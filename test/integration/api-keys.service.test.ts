@@ -297,6 +297,43 @@ describe('ApiKeysService.rotate', () => {
     });
   });
 
+  it('allows exactly one concurrent rotation and rejects every loser as not rotatable', async () => {
+    const { service, storage } = svc();
+    const created = await service.create({
+      tenantId: 't1',
+      name: 'old key',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 8 }, () => service.rotate(created.id, { gracePeriodMs: 1_000 })),
+    );
+    const successes = results.filter(
+      (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof service.rotate>>> =>
+        result.status === 'fulfilled',
+    );
+    const failures = results.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+
+    expect(successes).toHaveLength(1);
+    expect(failures).toHaveLength(7);
+    for (const failure of failures) {
+      expect(failure.reason).toMatchObject({
+        code: 'api_key_not_rotatable',
+      });
+    }
+
+    const records = await storage.listByTenant('t1');
+    const oldRecord = records.find((record) => record.id === created.id);
+    const replacements = records.filter((record) => record.id !== created.id);
+    expect(replacements).toHaveLength(1);
+    expect(oldRecord?.replacedByKeyId).toBe(successes[0].value.id);
+    await expect(service.verify(successes[0].value.key)).resolves.toMatchObject({
+      keyId: successes[0].value.id,
+    });
+  });
+
   it('retries when storage reports a duplicate prefix during rotation', async () => {
     const oldRecord: ApiKeyRecord = {
       id: 'key_1',
@@ -318,7 +355,7 @@ describe('ApiKeysService.rotate', () => {
     const rotate = jest
       .fn<ReturnType<ApiKeyStorage['rotate']>, Parameters<ApiKeyStorage['rotate']>>()
       .mockRejectedValueOnce(new Error('duplicate prefix: abcdefghijkl'))
-      .mockResolvedValue(undefined);
+      .mockResolvedValue('rotated');
     const storage: ApiKeyStorage = {
       insert: jest.fn().mockResolvedValue(undefined),
       findById: jest.fn().mockResolvedValue(oldRecord),
@@ -345,6 +382,46 @@ describe('ApiKeysService.rotate', () => {
     expect(rotate).toHaveBeenCalledTimes(2);
     expect(rotated.id).toBe('key_3');
     expect(rotated.key).toMatch(/^nk_live_[A-Za-z0-9]{12}_[A-Za-z0-9]{32}$/);
+  });
+
+  it('fails fast when a legacy custom storage returns no atomic rotation result', async () => {
+    const oldRecord: ApiKeyRecord = {
+      id: 'key_1',
+      tenantId: 't1',
+      name: 'old key',
+      environment: 'live',
+      prefix: 'abcdefghijkl',
+      hash: 'f'.repeat(64),
+      pepperVersion: 1,
+      scopes: ['reports:read'],
+      lastUsedAt: null,
+      expiresAt: null,
+      revokedAt: null,
+      rotatedAt: null,
+      replacedByKeyId: null,
+      createdBy: null,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    const legacyStorage = {
+      insert: jest.fn().mockResolvedValue(undefined),
+      findById: jest.fn().mockResolvedValue(oldRecord),
+      findByPrefix: jest.fn().mockResolvedValue(null),
+      listByTenant: jest.fn().mockResolvedValue([]),
+      markRevoked: jest.fn().mockResolvedValue(undefined),
+      touchLastUsed: jest.fn().mockResolvedValue(undefined),
+      rotate: jest.fn().mockResolvedValue(undefined),
+    } as unknown as ApiKeyStorage;
+    const service = new ApiKeysService({
+      storage: legacyStorage,
+      hasher: new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 }),
+      namespace: 'nk',
+      idFactory: () => 'key_2',
+      clock: () => new Date('2026-01-01T00:00:00Z'),
+    });
+
+    await expect(service.rotate(oldRecord.id)).rejects.toThrow(
+      'ApiKeyStorage.rotate() must atomically return "rotated" or "not_rotatable"',
+    );
   });
 });
 

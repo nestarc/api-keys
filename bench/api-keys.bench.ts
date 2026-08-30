@@ -85,9 +85,18 @@ class BalancedInMemoryStorage implements ApiKeyStorage {
     newRecord: ApiKeyRecord;
     oldExpiresAt: Date;
     rotatedAt: Date;
-  }): Promise<void> {
+  }): Promise<'rotated' | 'not_rotatable'> {
     const oldRecord = this.byId.get(input.oldKeyId);
-    if (!oldRecord) throw new Error(`not found: ${input.oldKeyId}`);
+    if (
+      !oldRecord ||
+      oldRecord.revokedAt !== null ||
+      oldRecord.rotatedAt !== null ||
+      oldRecord.replacedByKeyId !== null ||
+      (oldRecord.expiresAt !== null &&
+        oldRecord.expiresAt.getTime() <= input.rotatedAt.getTime())
+    ) {
+      return 'not_rotatable';
+    }
     if (this.byId.has(input.newRecord.id)) {
       throw new Error(`duplicate id: ${input.newRecord.id}`);
     }
@@ -102,6 +111,7 @@ class BalancedInMemoryStorage implements ApiKeyStorage {
     const snapshot = { ...input.newRecord };
     this.byId.set(snapshot.id, snapshot);
     this.byPrefix.set(snapshot.prefix, snapshot);
+    return 'rotated';
   }
 }
 

@@ -3,6 +3,7 @@ import type {
   ApiKeyStorage,
   ListApiKeysOptions,
   RotateApiKeyStorageInput,
+  RotateApiKeyStorageResult,
 } from './api-key-storage.interface';
 
 export class InMemoryApiKeyStorage implements ApiKeyStorage {
@@ -65,10 +66,17 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
     record.lastUsedAt = at;
   }
 
-  async rotate(input: RotateApiKeyStorageInput): Promise<void> {
+  async rotate(input: RotateApiKeyStorageInput): Promise<RotateApiKeyStorageResult> {
     const oldRecord = this.records.get(input.oldKeyId);
-    if (!oldRecord) {
-      throw new Error(`not found: ${input.oldKeyId}`);
+    if (
+      !oldRecord ||
+      oldRecord.revokedAt !== null ||
+      oldRecord.rotatedAt !== null ||
+      oldRecord.replacedByKeyId !== null ||
+      (oldRecord.expiresAt !== null &&
+        oldRecord.expiresAt.getTime() <= input.rotatedAt.getTime())
+    ) {
+      return 'not_rotatable';
     }
 
     if (this.records.has(input.newRecord.id)) {
@@ -87,6 +95,7 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
     oldRecord.rotatedAt = input.rotatedAt;
     oldRecord.replacedByKeyId = input.newRecord.id;
     this.records.set(input.newRecord.id, cloneRecord(input.newRecord));
+    return 'rotated';
   }
 }
 
