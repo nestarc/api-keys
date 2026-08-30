@@ -18,6 +18,7 @@ import {
   defaultApiKeyClientIpResolver,
   isIpAllowed,
 } from './ip-allowlist';
+import { copyApiKeyContext } from './payload-copy';
 import { scopeSatisfies } from './scope-matcher';
 import type { Environment } from './types';
 
@@ -77,8 +78,9 @@ export class ApiKeysGuard implements CanActivate {
       throw new ApiKeyError(ApiKeyErrorCode.ScopeInsufficient);
     }
 
-    request[API_KEY_CONTEXT_PROPERTY] = apiKeyContext;
-    await this.contextWriter?.(apiKeyContext, request);
+    request[API_KEY_CONTEXT_PROPERTY] = copyApiKeyContext(apiKeyContext);
+    await this.contextWriter?.(copyApiKeyContext(apiKeyContext), request);
+    request[API_KEY_CONTEXT_PROPERTY] = copyApiKeyContext(apiKeyContext);
     return true;
   }
 }

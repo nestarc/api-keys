@@ -297,7 +297,17 @@ ApiKeysModule.forRoot({
 });
 ```
 
-For tenancy or RLS integration, pass `contextWriter` and write the verified `ApiKeyContext` into your own request-local context after scope and environment checks pass.
+Observer payloads are defensive copies. Their nested scope arrays and `Date` values do not share
+mutable references with stored records, operation results, verification context, or error-reporting
+callbacks. The public event and metric interfaces remain mutable for source compatibility, so sinks
+may annotate their local payload, but object identity is not a supported contract.
+
+For tenancy or RLS integration, pass `contextWriter` and write the verified `ApiKeyContext` into
+your own request-local context after scope, environment, and IP checks pass. The writer receives an
+isolated context copy. After it completes, the Guard restores `request.apiKey` from the verified
+identity, so writer mutation or replacement cannot change the tenant, key ID, environment, scopes,
+prefix, or IP policy observed by downstream RBAC/RLS code. `ApiKeyContext` stays mutable at the type
+level for source compatibility; this guarantee is runtime boundary isolation, not a deep-freeze API.
 
 ## Verification metrics
 

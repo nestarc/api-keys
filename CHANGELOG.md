@@ -29,6 +29,11 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
   key material or mutating storage. Invalid issue input now fails with the stable
   `api_key_invalid_input` operation code, and the parser enforces base62 prefix/secret syntax so
   every issued key satisfies parse, verify, and logger-redaction round trips.
+- Defensively copy verification context, lifecycle event, and metric payloads so synchronous or
+  asynchronous observer mutation cannot alter authenticated scopes, operation result dates, stored
+  identity data, or failure-reporting payloads. `ApiKeysGuard` now gives `contextWriter` an isolated
+  copy and restores the verified `request.apiKey` identity after the writer completes, preventing
+  cross-tenant, privileged-scope, and IP-policy replacement from reaching downstream RBAC/RLS code.
 
 ### Changed
 

@@ -9,6 +9,11 @@ import {
 import { generateKey, parseKey } from './key-format';
 import { normalizeAllowedIpCidrs } from './ip-allowlist';
 import { validateEnvironment, validateNamespace } from './input-validation';
+import {
+  copyApiKeyContext,
+  copyApiKeyEvent,
+  copyApiKeyVerificationMetric,
+} from './payload-copy';
 import { flattenScopes } from './scope-matcher';
 import type { ApiKeyStorage } from './storage/api-key-storage.interface';
 import type {
@@ -242,12 +247,12 @@ export class ApiKeysService {
         keyId: record.id,
         tenantId: record.tenantId,
         environment: record.environment,
-        scopes: record.scopes,
+        scopes: [...record.scopes],
         prefix: record.prefix,
         allowedIpCidrs: [...(record.allowedIpCidrs ?? [])],
       };
       this.recordVerificationMetric('success', startedAt, metricEnvironment);
-      return apiKeyContext;
+      return copyApiKeyContext(apiKeyContext);
     } catch (error) {
       this.recordVerificationMetric(
         verificationOutcomeFromError(error),
@@ -495,7 +500,7 @@ export class ApiKeysService {
     }
 
     try {
-      const result = this.onEvent(event);
+      const result = this.onEvent(copyApiKeyEvent(event));
       if (result && typeof result === 'object' && 'then' in result) {
         void result.catch((error: unknown) => this.handleEventError(error, event));
       }
@@ -506,7 +511,7 @@ export class ApiKeysService {
 
   private handleEventError(error: unknown, event: ApiKeyEvent): void {
     try {
-      this.onEventError?.(error, event);
+      this.onEventError?.(error, copyApiKeyEvent(event));
     } catch {
       // Event failure reporting must not break API key operations.
     }
@@ -529,7 +534,7 @@ export class ApiKeysService {
     };
 
     try {
-      const result = this.onMetric(metric);
+      const result = this.onMetric(copyApiKeyVerificationMetric(metric));
       if (result && typeof result === 'object' && 'then' in result) {
         void result.catch((error: unknown) => this.handleMetricError(error, metric));
       }
@@ -540,7 +545,7 @@ export class ApiKeysService {
 
   private handleMetricError(error: unknown, metric: ApiKeyVerificationMetric): void {
     try {
-      this.onMetricError?.(error, metric);
+      this.onMetricError?.(error, copyApiKeyVerificationMetric(metric));
     } catch {
       // Metric failure reporting must not break API key operations.
     }

@@ -6,6 +6,7 @@ import { ApiKeysService } from '../../src/api-keys.service';
 import { API_KEY_CONTEXT_PROPERTY } from '../../src/context';
 import { Sha256Hasher } from '../../src/hasher';
 import { InMemoryApiKeyStorage } from '../../src/storage/in-memory-storage';
+import type { ApiKeyContext } from '../../src/types';
 
 const rbacIntegration = createRequire(__filename)('@nestarc/rbac/integrations/api-keys') as {
   createApiKeySubjectResolver: () => (context: ExecutionContext) => unknown | Promise<unknown>;
@@ -32,12 +33,25 @@ describe('@nestarc/rbac compatibility', () => {
       getHandler: () => () => undefined,
       getClass: () => class {},
     } as unknown as ExecutionContext;
+    const contextWriter = async (context: ApiKeyContext, targetRequest: unknown) => {
+      context.tenantId = 'tenant_attacker';
+      context.scopes.splice(0, context.scopes.length, 'admin:write');
+      (targetRequest as Record<string, unknown>)[API_KEY_CONTEXT_PROPERTY] = {
+        ...context,
+        keyId: 'key_attacker',
+      };
+      await Promise.resolve();
+    };
     const GuardCtor = ApiKeysGuard as unknown as {
-      new (service: ApiKeysService, reflector: Reflector): ApiKeysGuard;
+      new (
+        service: ApiKeysService,
+        reflector: Reflector,
+        contextWriter: (context: ApiKeyContext, request: unknown) => void | Promise<void>,
+      ): ApiKeysGuard;
     };
 
     await expect(
-      new GuardCtor(service, new Reflector()).canActivate(executionContext),
+      new GuardCtor(service, new Reflector(), contextWriter).canActivate(executionContext),
     ).resolves.toBe(true);
 
     const resolver = rbacIntegration.createApiKeySubjectResolver();
@@ -46,6 +60,11 @@ describe('@nestarc/rbac compatibility', () => {
       id: 'key_rbac',
       tenantId: 'tenant_rbac',
       attributes: request[API_KEY_CONTEXT_PROPERTY],
+    });
+    expect(request[API_KEY_CONTEXT_PROPERTY]).toMatchObject({
+      keyId: 'key_rbac',
+      tenantId: 'tenant_rbac',
+      scopes: ['reports:read'],
     });
   });
 });

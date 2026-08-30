@@ -148,7 +148,7 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 2 | `AK-M02` | P0 | `DONE` | L | 없음 | concurrent rotation을 exactly-once CAS로 변경 |
 | 3 | `AK-M03` | P1 | `DONE` | M | 없음 | 시간/TTL/grace 입력과 손상 record fail-closed |
 | 4 | `AK-M04` | P1 | `DONE` | M | 없음 | namespace·environment·scope·parser·redaction round-trip 계약 |
-| 5 | `AK-M05` | P1 | `READY` | M | 없음 | observer/contextWriter 경계와 인증 context whole-object 불변성 |
+| 5 | `AK-M05` | P1 | `DONE` | M | 없음 | observer/contextWriter 경계와 인증 context whole-object 불변성 |
 | 6A | `AK-M06A` | P1 | `READY` | S | 없음 | tenant ID producer canonicalization ADR |
 | 6B | `AK-M06B` | P1 | `BLOCKED` | M | `AK-M06A`, `RBAC-M01`+`RBAC-M02` 포함 published RBAC | tenant ID producer 계약 구현과 packed RBAC consumer |
 | 6C | `AK-M06C` | P1 | `BLOCKED` | M | `AK-M02`, `AK-M06A` | tenant-bound revoke/rotate 안전 API 또는 management ownership 결정 |
@@ -332,21 +332,30 @@ CHANGELOG에 기록했다.
 
 ### `AK-M05` — observer payload와 인증 context whole-object 불변성
 
-- 상태: `P1 / READY`
+- 상태: `P1 / DONE`
 - 문제: usage event와 반환 `ApiKeyContext`가 mutable scopes 배열을 공유할 수 있다. Guard는 같은 context object를 `request.apiKey`에 저장한 뒤 `contextWriter`에 넘기므로 writer가 tenant/key/scopes를 바꾸면 downstream RBAC/RLS가 변조된 identity를 읽을 수 있다.
 
 완료 조건:
 
-- [ ] event, metric, 반환 context 사이에 mutable nested collection/Date alias가 없다.
-- [ ] sync/async sink가 payload를 변경해도 반환 context와 Guard 판단이 바뀌지 않는다.
-- [ ] `contextWriter`에 전달한 object를 변경하거나 교체해도 이미 인증된 `request.apiKey`의 tenantId/keyId/environment/scopes/IP policy가 바뀌지 않는다.
-- [ ] downstream RBAC/RLS fixture가 contextWriter 이후에도 verified identity를 읽는다.
-- [ ] public type을 `readonly`로 강화할지 runtime defensive copy만 할지 호환성을 기록한다.
-- [ ] 모든 event type의 nested collection을 같은 기준으로 검토한다.
+- [x] event, metric, 반환 context 사이에 mutable nested collection/Date alias가 없다.
+- [x] sync/async sink가 payload를 변경해도 반환 context와 Guard 판단이 바뀌지 않는다.
+- [x] `contextWriter`에 전달한 object를 변경하거나 교체해도 이미 인증된 `request.apiKey`의 tenantId/keyId/environment/scopes/IP policy가 바뀌지 않는다.
+- [x] downstream RBAC/RLS fixture가 contextWriter 이후에도 verified identity를 읽는다.
+- [x] public type을 `readonly`로 강화할지 runtime defensive copy만 할지 호환성을 기록한다.
+- [x] 모든 event type의 nested collection을 같은 기준으로 검토한다.
 
 검증: 프로필 A/B, malicious/buggy observer와 contextWriter mutation tests, Guard privileged-scope 및 cross-tenant downstream negative tests.
 
 비범위: callback sandboxing, 범용 deep-freeze library, storage adapter record Date cloning(`AK-M16` 소유).
+
+완료 결정(2026-08-30): public `ApiKeyContext`/event/metric type은 기존 TypeScript 소비자의
+source compatibility를 위해 mutable로 유지하고 runtime defensive copy를 적용한다. verification
+context의 scopes/IP 배열, 모든 lifecycle event의 `at`, created/used/rotated scopes, rotated grace
+deadline과 metric object는 sink·error reporter 경계마다 분리한다. Guard는 검증 context와 별도인
+copy를 `contextWriter`에 넘기고 writer 완료 뒤 untouched verified identity에서 `request.apiKey`를
+복원한다. writer가 전달 object 또는 request property를 sync/async로 변경해도 tenant/key/environment,
+privileged scope, prefix, IP policy가 downstream 실제 RBAC resolver에 전파되지 않는다. runtime
+deep-freeze와 storage adapter record Date ownership은 각각 비범위와 `AK-M16`에 남긴다.
 
 ### `AK-M06A` — tenant ID producer ADR
 
@@ -808,7 +817,7 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 - [x] `AK-M02`: real PostgreSQL concurrent rotation exactly-once CAS
 - [x] `AK-M03`: invalid time/duration pre-mutation 및 corrupt persisted expiry fail-closed contract
 - [x] `AK-M04`: runtime environment/scope와 generated key parse/verify/redact property contract
-- [ ] `AK-M05`: observer/contextWriter whole-object mutation negative contract
+- [x] `AK-M05`: observer/contextWriter whole-object mutation negative contract
 - [ ] `AK-M06B`: packed API Keys candidate → published RBAC canonical/conflict consumer
 - [ ] `AK-M07A`: missing/denial telemetry semantics; `AK-M07B`: request-aware IP restriction contract
 - [ ] `AK-M09`: selected Node minimum/24 source lanes
@@ -821,11 +830,11 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 
 ## 10. 다음 세션 권장 시작점
 
-1. 현재 worktree의 `AK-M04` diff를 검토하고 이 변경만 별도 P1 commit/PR로 종료한다.
+1. 현재 worktree의 `AK-M05` diff를 검토하고 이 변경만 별도 P1 commit/PR로 종료한다.
 2. merge 뒤 최신 main에서 새 branch/worktree를 만든다.
-3. 실행 큐상 다음인 `AK-M05`만 선택한다.
-4. event sink와 contextWriter가 payload/object를 변경하는 observer/context RED test를 먼저 만든다.
-5. AK-M01~M04의 인증, atomic rotation, 시간값, runtime input과 round-trip contract를 회귀 gate로 유지한다.
+3. 실행 큐상 다음인 `AK-M06A`만 선택한다.
+4. 현재 저장된 tenant ID 형태와 RBAC 소비 계약을 목록화하고 reject/trim/preserve 정책 ADR을 먼저 만든다.
+5. AK-M01~M05의 인증, atomic rotation, 시간값, runtime input, observer/context 불변성 계약을 회귀 gate로 유지한다.
 
 `AK-M04`와 `AK-M05`를 한 PR에 넣지 않는다. dependency/toolchain 변경도 P1 수정과 섞지 않는다.
 
@@ -838,6 +847,7 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 | 2026-08-30 | `AK-M02` | `DONE` | `ea2ebb7` | `ea2ebb7 + worktree` (PR/release 없음) | profile A 11 suites/93 tests, profile B 85.55/80.56/80.82/85.14, Prisma 5/6/7 PostgreSQL 각 18 tests, strict legacy/modern PASS | AK-M02 단독 0.4.0 PR 뒤 `AK-M03` 시작 |
 | 2026-08-30 | `AK-M03` | `DONE` | `c6c343a` | `c6c343a + worktree` (PR/release 없음) | profile A 11 suites/116 tests, profile B 86.82/81.85/83.11/86.49, Prisma 5/6/7 PostgreSQL 각 18 tests, build/audit PASS | AK-M03 단독 P1 PR 뒤 `AK-M04` 시작 |
 | 2026-08-30 | `AK-M04` | `DONE` | `2a867ca` | `2a867ca + worktree` (PR/release 없음) | profile A 11 suites/148 tests, profile B 87.54/83.26/84.70/87.30, build/pack 46 entries/bench/audit PASS | AK-M04 단독 0.4.0 P1 PR 뒤 `AK-M05` 시작 |
+| 2026-08-30 | `AK-M05` | `DONE` | `3477505` | `3477505 + worktree` (PR/release 없음) | profile A 11 suites/151 tests, profile B 88.03/84.49/85.22/87.79, malicious observer/writer와 실제 RBAC resolver PASS | AK-M05 단독 P1 PR 뒤 `AK-M06A` 시작 |
 
 ### AK-M01 종료 인계
 
@@ -979,4 +989,39 @@ Unverified paths and reason: remote GitHub CI/release jobs은 push 전이라 미
 External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
 Next exact action: AK-M04 파일만 검토·commit해 pre-1.0 0.4.0 대상 단독 P1 PR로 merge한 뒤
   AK-M05의 observer/contextWriter whole-object mutation RED test를 추가한다.
+```
+
+### AK-M05 종료 인계
+
+```text
+Task: AK-M05
+State: DONE
+Start ref / end ref: 3477505 / 3477505 + session worktree (commit·PR·release 없음)
+Changed files: src/payload-copy.ts, src/api-keys.service.ts, src/api-keys.guard.ts,
+  test/integration/api-keys.service.test.ts, test/integration/api-keys.guard.test.ts,
+  test/integration/rbac-compatibility.test.ts, README.md, CHANGELOG.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: public context/event/metric type은 source compatibility를 위해 mutable로 유지하고
+  runtime defensive copy만 적용한다. sink/error reporter와 contextWriter/request.apiKey는 서로 다른
+  object·array·Date를 받으며 Guard는 writer 완료 뒤 verified identity를 복원한다. deep-freeze는 하지 않는다.
+Commands and exact results:
+  RED: npm test -- --runInBand test/integration/api-keys.service.test.ts
+    test/integration/api-keys.guard.test.ts => expected FAIL; 3 tests failed, 73 passed
+    (sync/async usage scope alias, rotated grace Date alias, writer tenant/key/scope/IP replacement)
+  npm test -- --runInBand test/integration/api-keys.service.test.ts
+    test/integration/api-keys.guard.test.ts test/integration/rbac-compatibility.test.ts
+    => 3 suites, 77 tests PASS
+  npm run lint => PASS
+  ./node_modules/.bin/tsc --noEmit -p tsconfig.build.json => PASS
+  npm test -- --runInBand => 11 suites, 151 tests PASS
+  fresh Jest coverage (/tmp/api-keys-m05-final-coverage.ksWIDi) => statements 88.03%,
+    branches 84.49%, functions 85.22%, lines 87.79%; payload-copy.ts statements/lines 100%
+  npm run build => PASS
+  git diff --check => PASS
+Unverified paths and reason: remote GitHub CI/release jobs은 push 전이라 미실행. AK-M05는 storage
+  schema/Prisma/support matrix를 변경하지 않아 profile C real PostgreSQL과 packed Nest consumers는
+  계획된 검증 범위에서 제외했다. adapter record Date ownership은 계획대로 AK-M16에 남겼다.
+External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
+Next exact action: AK-M05 파일만 검토·commit해 별도 P1 PR로 merge한 뒤 AK-M06A에서 현재 tenant ID
+  producer/consumer 형태를 목록화하고 reject/trim/preserve 정책 ADR을 작성한다.
 ```

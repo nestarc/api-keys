@@ -9,7 +9,7 @@ import { API_KEY_REDACT_REGEX, parseKey } from '../../src/key-format';
 import type { ApiKeyStorage } from '../../src/storage/api-key-storage.interface';
 import { InMemoryApiKeyStorage } from '../../src/storage/in-memory-storage';
 import { PrismaApiKeyStorage, type PrismaLike } from '../../src/storage/prisma-storage';
-import type { ApiKeyRecord, ApiKeyVerificationMetric } from '../../src/types';
+import type { ApiKeyEvent, ApiKeyRecord, ApiKeyVerificationMetric } from '../../src/types';
 
 interface RotatableService extends ApiKeysService {
   rotate(
@@ -28,8 +28,8 @@ function svc(
     hasher: Sha256Hasher;
     onAuthFailed: (prefix: string | null, code: string) => void;
     clock: () => Date;
-    onEvent: (event: Record<string, unknown>) => void | Promise<void>;
-    onEventError: (error: unknown, event: Record<string, unknown>) => void;
+    onEvent: (event: ApiKeyEvent) => void | Promise<void>;
+    onEventError: (error: unknown, event: ApiKeyEvent) => void;
     onMetric: (metric: ApiKeyVerificationMetric) => void | Promise<void>;
     onMetricError: (error: unknown, metric: ApiKeyVerificationMetric) => void;
     monotonicClock: () => number;
@@ -525,8 +525,95 @@ describe('ApiKeysService.rotate', () => {
 });
 
 describe('ApiKeysService lifecycle events and TTL policy', () => {
+  it('isolates returned verification context from synchronous and asynchronous usage event mutation', async () => {
+    let releaseAsyncMutation: (() => void) | undefined;
+    const asyncMutationGate = new Promise<void>((resolve) => {
+      releaseAsyncMutation = resolve;
+    });
+    const eventSnapshots: ApiKeyEvent[] = [];
+    const { service } = svc({
+      emitUsageEvents: true,
+      onEvent: async (event) => {
+        eventSnapshots.push(event);
+        if (event.type !== 'api_key.used') {
+          return;
+        }
+
+        event.scopes[0] = 'admin:write';
+        event.at.setUTCFullYear(1999);
+        await asyncMutationGate;
+        event.scopes.push('billing:write');
+      },
+    });
+    const created = await service.create({
+      tenantId: 'tenant_verified',
+      name: 'observer isolation',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+
+    const context = await service.verify(created.key);
+    releaseAsyncMutation?.();
+    await Promise.resolve();
+
+    expect(context).toMatchObject({
+      keyId: created.id,
+      tenantId: 'tenant_verified',
+      environment: 'live',
+      scopes: ['reports:read'],
+    });
+    expect(eventSnapshots.find((event) => event.type === 'api_key.used')).toMatchObject({
+      scopes: ['admin:write', 'billing:write'],
+    });
+  });
+
+  it('isolates every lifecycle event collection and date from records and operation results', async () => {
+    const events: ApiKeyEvent[] = [];
+    const { service, storage } = svc({
+      emitUsageEvents: true,
+      onEvent: (event) => {
+        events.push(event);
+        event.at.setUTCFullYear(1999);
+        if ('scopes' in event) {
+          event.scopes.splice(0, event.scopes.length, 'admin:write');
+        }
+        if (event.type === 'api_key.rotated') {
+          event.graceExpiresAt.setUTCFullYear(1999);
+        }
+      },
+    });
+    const created = await service.create({
+      tenantId: 'tenant_events',
+      name: 'event isolation',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+    await service.verify(created.key);
+    const rotated = await service.rotate(created.id, { gracePeriodMs: 60_000 });
+    await service.revoke(rotated.id);
+    await expect(
+      service.verify(`nk_live_${'z'.repeat(12)}_${'z'.repeat(32)}`),
+    ).rejects.toMatchObject({ code: ApiKeyErrorCode.Invalid });
+
+    const records = await storage.listByTenant('tenant_events', { includeRevoked: true });
+    const oldRecord = records.find((record) => record.id === created.id);
+    const replacementRecord = records.find((record) => record.id === rotated.id);
+
+    expect(events.map((event) => event.type)).toEqual([
+      'api_key.created',
+      'api_key.used',
+      'api_key.rotated',
+      'api_key.revoked',
+      'api_key.auth_failed',
+    ]);
+    expect(oldRecord?.scopes).toEqual(['reports:read']);
+    expect(replacementRecord?.scopes).toEqual(['reports:read']);
+    expect(oldRecord?.createdAt.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+    expect(oldRecord?.rotatedAt?.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+    expect(replacementRecord?.createdAt.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+    expect(rotated.graceExpiresAt.toISOString()).toBe('2026-01-01T00:01:00.000Z');
+  });
+
   it('emits created revoked rotated and auth_failed events without raw key material', async () => {
-    const events: Record<string, unknown>[] = [];
+    const events: ApiKeyEvent[] = [];
     const { service, storage } = svc({
       onEvent: (event) => {
         events.push(event);
@@ -599,7 +686,11 @@ describe('ApiKeysService lifecycle events and TTL policy', () => {
   it('isolates lifecycle event hook failures and reports them to onEventError', async () => {
     const onEventError = jest.fn();
     const { service } = svc({
-      onEvent: () => {
+      onEvent: (event) => {
+        event.at.setUTCFullYear(1999);
+        if (event.type === 'api_key.created') {
+          event.scopes.splice(0, event.scopes.length, 'admin:write');
+        }
         throw new Error('sink down');
       },
       onEventError,
@@ -617,12 +708,14 @@ describe('ApiKeysService lifecycle events and TTL policy', () => {
       expect.any(Error),
       expect.objectContaining({
         type: 'api_key.created',
+        at: new Date('2026-01-01T00:00:00Z'),
+        scopes: ['reports:read'],
       }),
     );
   });
 
   it('emits api_key_used only when usage events are enabled', async () => {
-    const disabledEvents: Record<string, unknown>[] = [];
+    const disabledEvents: ApiKeyEvent[] = [];
     const disabled = svc({
       onEvent: (event) => {
         disabledEvents.push(event);
@@ -635,7 +728,7 @@ describe('ApiKeysService lifecycle events and TTL policy', () => {
     });
     await disabled.service.verify(disabledCreated.key);
 
-    const enabledEvents: Record<string, unknown>[] = [];
+    const enabledEvents: ApiKeyEvent[] = [];
     const enabled = svc({
       onEvent: (event) => {
         enabledEvents.push(event);
@@ -993,7 +1086,9 @@ describe('ApiKeysService verification metrics', () => {
   it('isolates synchronous and asynchronous metric sink failures', async () => {
     const syncMetricError = jest.fn();
     const sync = svc({
-      onMetric: () => {
+      onMetric: (metric) => {
+        metric.outcome = 'error';
+        metric.durationMs = 999;
         throw new Error('sync metric sink down');
       },
       onMetricError: syncMetricError,
@@ -1009,6 +1104,7 @@ describe('ApiKeysService verification metrics', () => {
       expect.any(Error),
       expect.objectContaining({ outcome: 'success' }),
     );
+    expect(syncMetricError.mock.calls[0]?.[1]).not.toMatchObject({ durationMs: 999 });
 
     const asyncMetricError = jest.fn();
     const asyncSink = svc({

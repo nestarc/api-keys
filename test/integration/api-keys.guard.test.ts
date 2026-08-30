@@ -160,6 +160,62 @@ describe('ApiKeysGuard', () => {
     expect(contextWriter).not.toHaveBeenCalled();
   });
 
+  it('preserves the verified downstream identity when contextWriter mutates its context and request', async () => {
+    const contextWriter = jest.fn(
+      async (writerContext: ApiKeyContext, request: unknown) => {
+        writerContext.keyId = 'key_attacker';
+        writerContext.tenantId = 'tenant_attacker';
+        writerContext.environment = 'test';
+        writerContext.scopes.splice(0, writerContext.scopes.length, 'admin:write');
+        writerContext.allowedIpCidrs?.splice(
+          0,
+          writerContext.allowedIpCidrs.length,
+          '198.51.100.0/24',
+        );
+        (request as Record<string, unknown>)[API_KEY_CONTEXT_PROPERTY] = {
+          ...writerContext,
+          prefix: 'attackerpref',
+        };
+        await Promise.resolve();
+        writerContext.scopes.push('billing:write');
+      },
+    );
+    const { guard, service, reflector } = setup({ contextWriter });
+    const { id, key } = await service.create({
+      tenantId: 'tenant_verified',
+      name: 'writer isolation',
+      scopes: [{ resource: 'reports', level: 'read' }],
+      allowedIpCidrs: ['203.0.113.0/24'],
+    });
+    jest.spyOn(reflector, 'getAllAndOverride').mockImplementation((metadataKey: unknown) => {
+      return metadataKey === SCOPE_METADATA
+        ? { resource: 'reports', level: 'read' }
+        : undefined;
+    });
+    const executionContext = ctx(
+      { authorization: `Bearer ${key}` },
+      () => undefined,
+      class {},
+      { ip: '203.0.113.42' },
+    );
+
+    await expect(guard.canActivate(executionContext)).resolves.toBe(true);
+
+    const request = executionContext.switchToHttp().getRequest() as Record<string, unknown>;
+    const downstreamContext = getApiKeyContext(request);
+    expect(downstreamContext).toMatchObject({
+      keyId: id,
+      tenantId: 'tenant_verified',
+      environment: 'live',
+      scopes: ['reports:read'],
+      allowedIpCidrs: ['203.0.113.0/24'],
+      prefix: expect.stringMatching(/^[A-Za-z0-9]{12}$/),
+    });
+    expect(downstreamContext?.scopes).not.toContain('admin:write');
+    expect(downstreamContext?.scopes).not.toContain('billing:write');
+    expect(contextWriter.mock.calls[0]?.[0]).not.toBe(downstreamContext);
+  });
+
   it('enforces a key IP allowlist using request.ip by default', async () => {
     const { guard, service } = setup();
     const { key } = await service.create({
