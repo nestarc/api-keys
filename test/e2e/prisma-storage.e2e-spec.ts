@@ -1,9 +1,63 @@
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import { PrismaApiKeyStorage, type PrismaLike } from '../../src/storage/prisma-storage';
 import type { ApiKeyRecord } from '../../src/types';
 import { storageContract } from '../contract/storage-contract';
-import { PrismaClient } from './generated/prisma-client';
 
-const prisma = new PrismaClient();
+type E2ePrismaClient = PrismaLike & {
+  apiKey: PrismaLike['apiKey'] & { deleteMany(): Promise<unknown> };
+  $connect(): Promise<void>;
+  $disconnect(): Promise<void>;
+};
+
+type PrismaClientConstructor = new (options?: unknown) => E2ePrismaClient;
+type PrismaPgConstructor = new (options: { connectionString: string }) => unknown;
+type GeneratedPrismaModule = {
+  PrismaClient: PrismaClientConstructor;
+  Prisma: { prismaVersion: { client: string } };
+};
+const loadModule = createRequire(__filename);
+
+function createPrismaClient(): E2ePrismaClient {
+  const major = Number.parseInt(process.env.PRISMA_E2E_MAJOR ?? '', 10);
+  if (![5, 6, 7].includes(major)) {
+    throw new Error(`PRISMA_E2E_MAJOR must be 5, 6, or 7; received ${String(major)}`);
+  }
+
+  const generatedEntry = path.join(
+    __dirname,
+    'generated',
+    'prisma-client',
+    major === 7 ? 'client' : 'index',
+  );
+  const generatedPrisma = loadModule(generatedEntry) as GeneratedPrismaModule;
+  const expectedVersion = process.env.PRISMA_E2E_VERSION;
+  if (!expectedVersion || generatedPrisma.Prisma.prismaVersion.client !== expectedVersion) {
+    throw new Error(
+      `Generated Prisma client version ${generatedPrisma.Prisma.prismaVersion.client} ` +
+        `does not match expected ${expectedVersion ?? '<missing>'}`,
+    );
+  }
+  const { PrismaClient } = generatedPrisma;
+
+  if (major !== 7) {
+    return new PrismaClient();
+  }
+
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is required for the Prisma 7 PostgreSQL adapter');
+  }
+  const adapterLoader = process.env.PRISMA_E2E_RUNTIME_ROOT
+    ? createRequire(path.join(process.env.PRISMA_E2E_RUNTIME_ROOT, 'package.json'))
+    : loadModule;
+  const { PrismaPg } = adapterLoader('@prisma/adapter-pg') as {
+    PrismaPg: PrismaPgConstructor;
+  };
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+}
+
+const prisma = createPrismaClient();
 
 function fixture(overrides: Partial<ApiKeyRecord> = {}): ApiKeyRecord {
   return {

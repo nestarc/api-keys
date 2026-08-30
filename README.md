@@ -29,10 +29,11 @@ Secure, tenant-scoped API keys for NestJS + Prisma. SHA-256 hashed, Stripe-style
 npm install @nestarc/api-keys
 ```
 
-`@prisma/client` is an optional peer dependency. The Prisma storage adapter is verified with
-Prisma 5.22.0 and 6.19.3 and declares support for `^5.0.0 || ^6.0.0`. Prisma 7 is not yet in
-the supported range. Consumers that use the in-memory adapter or a custom storage adapter do
-not need to install Prisma.
+NestJS 10 and 11 are supported. `@prisma/client` is an optional peer dependency: the Prisma
+storage adapter is verified with Prisma 5.22.0, 6.19.3, and 7.10.0 against PostgreSQL and
+declares support for `^5.0.0 || ^6.0.0 || ^7.0.0`. Consumers that use the in-memory adapter or
+a custom storage adapter do not need to install Prisma. Prisma 7 consumers must also satisfy
+Prisma's Node.js requirement and configure the driver adapter for their database.
 
 ## Quickstart
 
@@ -41,6 +42,7 @@ import { Module } from '@nestjs/common';
 import { ApiKeysModule, PrismaApiKeyStorage } from '@nestarc/api-keys';
 import { PrismaClient } from '@prisma/client';
 
+// Prisma 5/6 initialization
 const prisma = new PrismaClient();
 
 @Module({
@@ -55,7 +57,22 @@ const prisma = new PrismaClient();
 export class AppModule {}
 ```
 
-Add the schema model from `prisma/schema.example.prisma` into your own `schema.prisma` and run a migration.
+With Prisma 7, initialize the generated client with its required driver adapter instead:
+
+```typescript
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from './generated/prisma/client';
+
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
+});
+```
+
+For Prisma 5/6, add the model from [`prisma/schema.example.prisma`](prisma/schema.example.prisma)
+to your schema. For Prisma 7, use
+[`prisma/schema.example.v7.prisma`](prisma/schema.example.v7.prisma) with a project-root
+`prisma.config.ts` based on
+[`prisma/prisma.config.example.ts`](prisma/prisma.config.example.ts), then run a migration.
 
 Use a product-specific `namespace` such as `acme` or `billing` instead of relying on the default `nk`. That keeps your keys distinct if multiple packages or services generate API keys in the same ecosystem.
 
@@ -334,10 +351,17 @@ request(app).get('/reports').set('Authorization', `Bearer ${fixture.key}`);
 
 CI runs `lint`, `test`, `build`, and a bounded benchmark smoke check on Node 20 and 22 for every
 PR. It also runs the PostgreSQL storage contract against matching Prisma CLI/client versions
-5.22.0 and 6.19.3. Run that contract locally with `npm run test:e2e:prisma`; the runner uses
-`PRISMA_E2E_DATABASE_URL` when supplied, otherwise it starts a disposable PostgreSQL 16 Docker
-container. `npm run test:consumer:strict` packs the library and verifies an independent Prisma
-6.19.3 consumer installation without `--legacy-peer-deps` or `--force`.
+5.22.0, 6.19.3, and 7.10.0; the Prisma 7 lane uses matching `@prisma/adapter-pg`. Run that
+contract locally with `npm run test:e2e:prisma`; the runner uses `PRISMA_E2E_DATABASE_URL` when
+supplied, otherwise it starts a disposable PostgreSQL 16 Docker container.
+
+`npm run test:consumer:strict:legacy` packs the library and verifies exact Nest 10.4.20 with
+Prisma 6.19.3. `npm run test:consumer:strict:modern` verifies exact Nest 11.2.1 with Prisma
+7.10.0. Both use an independent strict install, assert installed versions and packed peer
+metadata, compile the packed public declarations with `skipLibCheck: false`, and boot a Nest
+application context. They reject inherited npm bypass settings and explicitly keep
+`--legacy-peer-deps` and `--force` disabled.
+`npm run test:consumer:strict` defaults to the modern lane.
 
 Releases are tag-driven: `npm version <bump> && git push --tags` triggers the workflow in
 [`.github/workflows/release.yml`](.github/workflows/release.yml), which repeats the Prisma matrix

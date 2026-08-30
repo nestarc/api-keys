@@ -1,6 +1,6 @@
 {
   "name": "@nestarc/api-keys",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Secure, tenant-scoped API keys for NestJS + Prisma. SHA-256 hashed, Stripe-style scopes, and test/live environments.",
   "license": "MIT",
   "author": "nestarc",
@@ -12,6 +12,9 @@
   "types": "dist/index.d.ts",
   "files": [
     "dist",
+    "prisma/prisma.config.example.ts",
+    "prisma/schema.example.prisma",
+    "prisma/schema.example.v7.prisma",
     "README.md",
     "LICENSE"
   ],
@@ -21,6 +24,8 @@
     "test:watch": "jest --watch",
     "test:e2e:prisma": "node scripts/test-prisma-e2e.js",
     "test:consumer:strict": "node scripts/test-strict-consumer.js",
+    "test:consumer:strict:legacy": "node scripts/test-strict-consumer.js --nest 10.4.20 --prisma 6.19.3",
+    "test:consumer:strict:modern": "node scripts/test-strict-consumer.js --nest 11.2.1 --prisma 7.10.0",
     "bench": "ts-node bench/api-keys.bench.ts",
     "bench:smoke": "npm run bench -- --iterations 250 --warmup 50 --timing-threshold-ms 0.5",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -28,9 +33,9 @@
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
-    "@nestjs/common": "^10.0.0",
-    "@nestjs/core": "^10.0.0",
-    "@prisma/client": "^5.0.0 || ^6.0.0",
+    "@nestjs/common": "^10.0.0 || ^11.0.0",
+    "@nestjs/core": "^10.0.0 || ^11.0.0",
+    "@prisma/client": "^5.0.0 || ^6.0.0 || ^7.0.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.0.0"
   },

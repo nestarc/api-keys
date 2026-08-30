@@ -12,7 +12,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        prisma: ['5.22.0', '6.19.3']
+        include:
+          - prisma: '5.22.0'
+            consumer: ''
+          - prisma: '6.19.3'
+            consumer: 'test:consumer:strict:legacy'
+          - prisma: '7.10.0'
+            consumer: 'test:consumer:strict:modern'
     services:
       postgres:
         image: postgres:16-alpine
@@ -34,19 +40,26 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '22'
           package-manager-cache: false
 
       - run: npm ci
 
       - name: Install matching Prisma CLI and client
-        run: npm install --no-save --package-lock=false prisma@${{ matrix.prisma }} @prisma/client@${{ matrix.prisma }}
+        run: |
+          runtime_root="${RUNNER_TEMP}/api-keys-prisma-${{ matrix.prisma }}"
+          packages=("prisma@${{ matrix.prisma }}" "@prisma/client@${{ matrix.prisma }}")
+          if [[ "${{ matrix.prisma }}" == 7.* ]]; then
+            packages+=("@prisma/adapter-pg@${{ matrix.prisma }}")
+          fi
+          npm install --prefix "$runtime_root" --no-save --package-lock=false "${packages[@]}"
+          echo "PRISMA_E2E_RUNTIME_ROOT=$runtime_root" >> "$GITHUB_ENV"
 
       - run: npm run test:e2e:prisma
 
-      - name: Verify strict Prisma 6 tarball consumer
-        if: matrix.prisma == '6.19.3'
-        run: npm run test:consumer:strict
+      - name: Verify strict tarball consumer
+        if: matrix.consumer != ''
+        run: npm run ${{ matrix.consumer }}
 
   publish:
     name: publish to npm
