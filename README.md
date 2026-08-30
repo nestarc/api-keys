@@ -14,11 +14,11 @@ Secure, tenant-scoped API keys for NestJS + Prisma. SHA-256 hashed, Stripe-style
 - **Zero-downtime user key rotation** — issue a replacement key with a configurable grace window.
 - **Scope system** — resource/level pairs (`reports:read`, `reports:write`) with `write`-implies-`read` semantics.
 - **Environment isolation** — `live` vs `test` keys that cannot cross over.
-- **Lifecycle hooks** — creation, revocation, rotation, auth-failure, and opt-in usage events with audit-safe payloads.
+- **Lifecycle hooks** — creation, revocation, rotation, auth-failure, authorization-denial, and opt-in usage events.
 - **Stable request context** — `@CurrentApiKey()`, `getApiKeyContext()`, and an optional `contextWriter` bridge.
 - **TTL policy** — optional default expiration, maximum expiration, and no-never-expires enforcement.
 - **Per-key IP allowlists** — exact IPv4/IPv6 addresses and CIDR ranges with fail-closed enforcement.
-- **Verification metrics** — low-cardinality success/failure and latency measurements through a pluggable sink.
+- **Verification and authorization metrics** — separate low-cardinality credential and request-policy measurements.
 - **Pluggable storage** — ships with Prisma and in-memory adapters plus a reusable contract suite.
 - **NestJS-native** — `ApiKeysModule.forRoot`, `ApiKeysGuard`, `@RequireScope`, `@RequireEnvironment`.
 - **Typed errors** — `ApiKeyError` with stable `code` values mapped to HTTP statuses.
@@ -108,6 +108,20 @@ const { id, key } = await apiKeys.create({
 // key is returned ONCE; show it to the user and discard.
 ```
 
+### Tenant identity
+
+`tenantId` is an opaque exact string owned by the application. API Keys accepts 1–255 JavaScript
+UTF-16 code units, rejects empty values and leading/trailing whitespace, and never trims, coerces,
+case-folds, or Unicode-normalizes the value. Internal whitespace and non-ASCII values are
+preserved. Use the same exact identifier in tenancy and RBAC; apply a narrower UUID or slug
+validator in your application before calling this package if your system requires one.
+
+Invalid runtime input fails with `ApiKeyOperationError` code `api_key_invalid_input` before key
+generation or storage access. A custom storage adapter that returns a non-canonical tenant is not
+silently repaired: verification and management reads fail closed. See the
+[tenant identity ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-tenant-identity-contract-adr.md) for existing-data migration
+and cross-package ownership.
+
 ## Key format
 
 ```text
@@ -168,8 +182,9 @@ const { key } = await apiKeys.create({
 ```
 
 Exact addresses are stored as `/32` or `/128`; CIDRs are normalized and deduplicated.
-Missing or empty allowlists are unrestricted. A restricted key used from another address,
-or without a resolvable client IP, fails with `api_key_ip_not_allowed`.
+Missing or empty allowlists are unrestricted. A restricted key used through `ApiKeysGuard` or
+`authorizeRequest()` from another address, or without a resolvable client IP, fails with
+`api_key_ip_not_allowed`.
 
 The default resolver reads `request.ip` and never trusts `X-Forwarded-For` directly. Configure
 your NestJS HTTP adapter's proxy trust correctly, or provide a resolver for your infrastructure:
@@ -185,6 +200,24 @@ ApiKeysModule.forRoot({
   },
 });
 ```
+
+`verify(rawKey)` is intentionally credential-only for backward compatibility. It authenticates
+format, secret, tenant identity, lifecycle, and expiry, then returns the stored environment,
+scopes, and IP policy without enforcing those request policies. Use the request-aware primitive
+for a custom transport:
+
+```typescript
+const apiKey = await apiKeys.authorizeRequest({
+  rawKey: message.apiKey,
+  clientIp: connection.verifiedRemoteAddress,
+  requiredEnvironment: 'live',
+  requiredScope: { resource: 'reports', level: 'read' },
+});
+```
+
+`ApiKeysGuard` uses the same primitive. A custom transport may also pass its request and a
+`clientIpResolver`; the resolver is called only for a restricted key. Never derive a trusted
+client IP from forwarded headers without configuring the surrounding proxy boundary.
 
 ## Pepper rotation
 
@@ -218,6 +251,21 @@ const replacement = await apiKeys.rotate(keyId, {
 // replacement.key is returned ONCE; show it to the user and discard.
 ```
 
+For a tenant-scoped management endpoint, bind the expected caller tenant in the same atomic
+storage mutation:
+
+```typescript
+const replacement = await apiKeys.rotateForTenant(callerTenantId, keyId, {
+  gracePeriodMs: 10 * 60 * 1000,
+});
+
+await apiKeys.revokeForTenant(callerTenantId, anotherKeyId);
+```
+
+A missing ID and a tenant mismatch both fail with `api_key_record_not_found`. The ID-only
+`rotate()` and `revoke()` methods remain available for trusted system-wide administration; they
+do not authorize tenant-scoped callers.
+
 The replacement keeps the old key's tenant, environment, scopes, and expiration unless you override them. The old key is not revoked; it receives `rotatedAt`, `replacedByKeyId`, and an `expiresAt` equal to the grace deadline. If the old key already expires earlier, the earlier expiration wins.
 
 The replacement also preserves `allowedIpCidrs` by default. Pass a new array to replace the
@@ -246,6 +294,12 @@ Legacy adapters returning `Promise<void>` now fail fast instead of being treated
 rotation. This public interface change is intentionally shipped as pre-1.0 minor `0.4.0`, not a
 `0.3.x` patch; custom adapter authors must update before upgrading.
 
+Tenant-bound management uses the optional `revokeForTenant()` and `rotateForTenant()` storage
+capabilities. Built-in adapters include `expectedTenantId` in the revoke update or rotation CAS.
+A custom adapter that does not implement the matching capability fails fast when the additive
+service method is called; the service never falls back to a separate tenant check followed by an
+ID-only mutation.
+
 ## Expiration and time values
 
 `expiresAt` must be a valid JavaScript `Date`. A past value is accepted and creates a key that is
@@ -267,6 +321,7 @@ values or `null`.
 
 ```typescript
 await apiKeys.revoke(keyId); // soft-delete: sets revokedAt, verification returns api_key_revoked
+await apiKeys.revokeForTenant(callerTenantId, keyId); // tenant-bound management path
 const active = await apiKeys.list('tenant_123'); // active keys only
 const all = await apiKeys.list('tenant_123', { includeRevoked: true });
 ```
@@ -275,7 +330,10 @@ Revoked keys remain in storage so you can audit historical usage. Use revocation
 
 ## Lifecycle events
 
-`onEvent` receives audit-safe lifecycle payloads. Raw keys, hashes, and peppers are never included. `api_key.used` is off by default because it can be high volume.
+`onEvent` receives lifecycle payloads. Raw keys, hashes, and peppers are never included.
+`api_key.authorization_denied` contains only the stable error code and timestamp; it excludes
+the raw credential, client IP, prefix, key ID, tenant ID, scopes, and route. `api_key.used` is off
+by default because it can be high volume.
 
 ```typescript
 ApiKeysModule.forRoot({
@@ -309,11 +367,12 @@ identity, so writer mutation or replacement cannot change the tenant, key ID, en
 prefix, or IP policy observed by downstream RBAC/RLS code. `ApiKeyContext` stays mutable at the type
 level for source compatibility; this guarantee is runtime boundary isolation, not a deep-freeze API.
 
-## Verification metrics
+## Verification and authorization metrics
 
-`onMetric` emits one bounded-cardinality measurement for each `verify()` call. Payloads contain
-only `outcome`, `durationMs`, and an optional `environment`; key IDs, tenant IDs, prefixes,
-scopes, client IPs, and raw key material are excluded.
+`onMetric` emits one bounded-cardinality measurement for each credential-verification attempt,
+whether it comes from `verify()` or `authorizeRequest()`. Payloads contain only `outcome`,
+`durationMs`, and an optional `environment`; key IDs, tenant IDs, prefixes, scopes, client IPs,
+and raw key material are excluded.
 
 ```typescript
 ApiKeysModule.forRoot({
@@ -335,8 +394,36 @@ ApiKeysModule.forRoot({
 });
 ```
 
-Metric sink failures are isolated from authentication. Use lifecycle events rather than metric
-labels when you need per-key audit details.
+`authorizeRequest()` and `ApiKeysGuard` emit a separate request-policy metric through
+`onAuthorizationMetric`. Missing credentials do not create a verification metric or
+`api_key.auth_failed`; they create authorization outcome `missing`. A supplied credential failure
+keeps its verification outcome and is collapsed to authorization outcome `credential_rejected`.
+Environment, IP, and scope denials use `environment_denied`, `ip_denied`, and `scope_denied`.
+
+```typescript
+ApiKeysModule.forRoot({
+  namespace: 'acme',
+  peppers: { 1: process.env.API_KEY_PEPPER! },
+  storage,
+  onAuthorizationMetric: (metric) => {
+    apiKeyAuthorizationCounter.add(1, {
+      outcome: metric.outcome,
+      environment: metric.environment ?? 'unknown',
+    });
+  },
+});
+```
+
+For direct `verify()` calls, successful credential verification remains an accepted use and
+updates `lastUsedAt` plus optional `api_key.used`. In the request-aware path, those usage signals
+are deferred until environment, IP, and scope checks all pass. A 403 denial therefore records a
+successful credential-verification metric plus an authorization denial, but not accepted usage.
+
+Metric sink failures are isolated from authentication and authorization. Use lifecycle events
+rather than metric labels when you need per-key audit details.
+
+See the [request authorization telemetry ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-request-authorization-telemetry-adr.md)
+for the full missing/credential/denial matrix and compatibility decision.
 
 ## RBAC integration
 
@@ -433,6 +520,8 @@ request(app).get('/reports').set('Authorization', `Bearer ${fixture.key}`);
 - [`docs/spec.md`](docs/spec.md) Technical spec
 - [`docs/spec-0.2.md`](docs/spec-0.2.md) v0.2 technical spec
 - [`docs/spec-0.3.md`](docs/spec-0.3.md) v0.3 technical spec
+- [Tenant identity and management boundary ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-tenant-identity-contract-adr.md)
+- [Request authorization telemetry ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-request-authorization-telemetry-adr.md)
 - [`CHANGELOG.md`](CHANGELOG.md) Release history
 
 ## Contributing
@@ -454,6 +543,12 @@ application context. They reject inherited npm bypass settings and explicitly ke
 `npm run test:consumer:http:nest10` and `npm run test:consumer:http:nest11` pack the library and
 exercise the default Nest HTTP exception pipeline with the exact supported Nest versions. They
 verify the 401/403 status matrix and the safe public error body without installing a custom filter.
+
+After an RBAC version containing both `RBAC-M01` and `RBAC-M02` is published, run
+`npm run test:consumer:rbac -- --rbac <exact-version>`. The consumer installs only the packed API
+Keys candidate and the exact registry RBAC artifact, verifies both integrity records, and exercises
+canonical/legacy API-key conflicts plus trusted tenant reconciliation. Published RBAC 0.2.1 is a
+known RED prerequisite result and must not be used as passing evidence for this gate.
 
 Releases are tag-driven: `npm version <bump> && git push --tags` triggers the workflow in
 [`.github/workflows/release.yml`](.github/workflows/release.yml), which repeats the Prisma matrix

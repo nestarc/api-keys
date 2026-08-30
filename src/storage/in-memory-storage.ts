@@ -4,6 +4,9 @@ import type {
   ListApiKeysOptions,
   RotateApiKeyStorageInput,
   RotateApiKeyStorageResult,
+  TenantBoundRevokeApiKeyStorageInput,
+  TenantBoundRevokeApiKeyStorageResult,
+  TenantBoundRotateApiKeyStorageInput,
 } from './api-key-storage.interface';
 
 export class InMemoryApiKeyStorage implements ApiKeyStorage {
@@ -57,6 +60,18 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
     record.revokedAt = at;
   }
 
+  async revokeForTenant(
+    input: TenantBoundRevokeApiKeyStorageInput,
+  ): Promise<TenantBoundRevokeApiKeyStorageResult> {
+    const record = this.records.get(input.keyId);
+    if (!record || record.tenantId !== input.expectedTenantId) {
+      return 'not_found';
+    }
+
+    record.revokedAt = input.revokedAt;
+    return 'revoked';
+  }
+
   async touchLastUsed(id: string, at: Date): Promise<void> {
     const record = this.records.get(id);
     if (!record) {
@@ -67,9 +82,24 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
   }
 
   async rotate(input: RotateApiKeyStorageInput): Promise<RotateApiKeyStorageResult> {
+    return this.rotateMatchingTenant(input);
+  }
+
+  async rotateForTenant(
+    input: TenantBoundRotateApiKeyStorageInput,
+  ): Promise<RotateApiKeyStorageResult> {
+    return this.rotateMatchingTenant(input, input.expectedTenantId);
+  }
+
+  private rotateMatchingTenant(
+    input: RotateApiKeyStorageInput,
+    expectedTenantId?: string,
+  ): RotateApiKeyStorageResult {
     const oldRecord = this.records.get(input.oldKeyId);
     if (
       !oldRecord ||
+      (expectedTenantId !== undefined && oldRecord.tenantId !== expectedTenantId) ||
+      (expectedTenantId !== undefined && input.newRecord.tenantId !== expectedTenantId) ||
       oldRecord.revokedAt !== null ||
       oldRecord.rotatedAt !== null ||
       oldRecord.replacedByKeyId !== null ||

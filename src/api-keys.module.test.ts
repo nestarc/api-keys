@@ -27,9 +27,10 @@ describe('ApiKeysModule.forRoot', () => {
     ).toThrow(/at least one pepper/);
   });
 
-  it('wires the client IP resolver and verification metric sink', async () => {
+  it('wires the client IP resolver and separate verification/authorization metric sinks', async () => {
     const clientIpResolver = jest.fn().mockReturnValue('203.0.113.42');
     const onMetric = jest.fn();
+    const onAuthorizationMetric = jest.fn();
     const moduleRef = await Test.createTestingModule({
       imports: [
         ApiKeysModule.forRoot({
@@ -38,6 +39,7 @@ describe('ApiKeysModule.forRoot', () => {
           storage: new InMemoryApiKeyStorage(),
           clientIpResolver,
           onMetric,
+          onAuthorizationMetric,
         }),
       ],
     }).compile();
@@ -54,6 +56,14 @@ describe('ApiKeysModule.forRoot', () => {
     expect(onMetric).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'api_key.verification',
+        outcome: 'success',
+      }),
+    );
+
+    await service.authorizeRequest({ rawKey: created.key });
+    expect(onAuthorizationMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'api_key.authorization',
         outcome: 'success',
       }),
     );

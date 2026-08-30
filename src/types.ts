@@ -111,6 +111,11 @@ export interface ApiKeyAuthFailedEvent extends ApiKeyEventBase {
   environment?: Environment;
 }
 
+export interface ApiKeyAuthorizationDeniedEvent extends ApiKeyEventBase {
+  type: 'api_key.authorization_denied';
+  code: ApiKeyErrorCode;
+}
+
 export interface ApiKeyUsedEvent extends ApiKeyEventBase {
   type: 'api_key.used';
   keyId: string;
@@ -125,6 +130,7 @@ export type ApiKeyEvent =
   | ApiKeyRevokedEvent
   | ApiKeyRotatedEvent
   | ApiKeyAuthFailedEvent
+  | ApiKeyAuthorizationDeniedEvent
   | ApiKeyUsedEvent;
 
 export type ApiKeyEventSink = (event: ApiKeyEvent) => void | Promise<void>;
@@ -145,6 +151,37 @@ export interface ApiKeyVerificationMetric {
 }
 
 export type ApiKeyMetricSink = (metric: ApiKeyVerificationMetric) => void | Promise<void>;
+
+export type ApiKeyAuthorizationOutcome =
+  | 'success'
+  | 'missing'
+  | 'credential_rejected'
+  | 'environment_denied'
+  | 'ip_denied'
+  | 'scope_denied'
+  | 'error';
+
+export interface ApiKeyAuthorizationMetric {
+  type: 'api_key.authorization';
+  outcome: ApiKeyAuthorizationOutcome;
+  durationMs: number;
+  environment?: Environment;
+}
+
+export type ApiKeyAuthorizationMetricSink = (
+  metric: ApiKeyAuthorizationMetric,
+) => void | Promise<void>;
+
+export interface ApiKeyRequestAuthorizationInput {
+  rawKey?: string | null;
+  requiredEnvironment?: Environment;
+  requiredScope?: Scope;
+  clientIp?: string;
+  request?: unknown;
+  clientIpResolver?: (
+    request: unknown,
+  ) => string | undefined | Promise<string | undefined>;
+}
 
 export interface ApiKeyTtlPolicy {
   defaultExpiresInMs?: number;

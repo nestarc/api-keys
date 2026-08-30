@@ -13,7 +13,12 @@ import {
 } from './ip-allowlist';
 import { validateNamespace } from './input-validation';
 import type { ApiKeyStorage } from './storage/api-key-storage.interface';
-import type { ApiKeyEventSink, ApiKeyMetricSink, ApiKeyTtlPolicy } from './types';
+import type {
+  ApiKeyAuthorizationMetricSink,
+  ApiKeyEventSink,
+  ApiKeyMetricSink,
+  ApiKeyTtlPolicy,
+} from './types';
 
 export const API_KEYS_OPTIONS = Symbol('API_KEYS_OPTIONS');
 export const API_KEYS_STORAGE = Symbol('API_KEYS_STORAGE');
@@ -29,6 +34,8 @@ export interface ApiKeysModuleOptions {
   onEventError?: ApiKeysServiceDeps['onEventError'];
   onMetric?: ApiKeyMetricSink;
   onMetricError?: ApiKeysServiceDeps['onMetricError'];
+  onAuthorizationMetric?: ApiKeyAuthorizationMetricSink;
+  onAuthorizationMetricError?: ApiKeysServiceDeps['onAuthorizationMetricError'];
   emitUsageEvents?: boolean;
   ttlPolicy?: ApiKeyTtlPolicy;
   contextWriter?: ApiKeyContextWriter;
@@ -64,6 +71,8 @@ export class ApiKeysModule {
             onEventError: options.onEventError,
             onMetric: options.onMetric,
             onMetricError: options.onMetricError,
+            onAuthorizationMetric: options.onAuthorizationMetric,
+            onAuthorizationMetricError: options.onAuthorizationMetricError,
             emitUsageEvents: options.emitUsageEvents,
             ttlPolicy: options.ttlPolicy,
           }),

@@ -149,12 +149,12 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 3 | `AK-M03` | P1 | `DONE` | M | 없음 | 시간/TTL/grace 입력과 손상 record fail-closed |
 | 4 | `AK-M04` | P1 | `DONE` | M | 없음 | namespace·environment·scope·parser·redaction round-trip 계약 |
 | 5 | `AK-M05` | P1 | `DONE` | M | 없음 | observer/contextWriter 경계와 인증 context whole-object 불변성 |
-| 6A | `AK-M06A` | P1 | `READY` | S | 없음 | tenant ID producer canonicalization ADR |
+| 6A | `AK-M06A` | P1 | `DONE` | S | 없음 | tenant ID producer canonicalization ADR |
 | 6B | `AK-M06B` | P1 | `BLOCKED` | M | `AK-M06A`, `RBAC-M01`+`RBAC-M02` 포함 published RBAC | tenant ID producer 계약 구현과 packed RBAC consumer |
-| 6C | `AK-M06C` | P1 | `BLOCKED` | M | `AK-M02`, `AK-M06A` | tenant-bound revoke/rotate 안전 API 또는 management ownership 결정 |
-| 7A | `AK-M07A` | P1 | `READY` | M | `AK-M01` | credential verification과 Guard authorization telemetry 분리 |
-| 7B | `AK-M07B` | P1 | `DECISION` | M | `AK-M01` | Guard 밖 IP allowlist의 request-aware 계약 결정·구현 |
-| 7C | `AK-M14` | P1 | `BLOCKED` | S | `AK-M07A` | legacy `onAuthFailed` observer failure 격리 |
+| 6C | `AK-M06C` | P1 | `DONE` | M | `AK-M02`, `AK-M06A` | tenant-bound revoke/rotate 안전 API 또는 management ownership 결정 |
+| 7A | `AK-M07A` | P1 | `DONE` | M | `AK-M01` | credential verification과 Guard authorization telemetry 분리 |
+| 7B | `AK-M07B` | P1 | `DONE` | M | `AK-M01` | Guard 밖 IP allowlist의 request-aware 계약 결정·구현 |
+| 7C | `AK-M14` | P1 | `READY` | S | `AK-M07A` | legacy `onAuthFailed` observer failure 격리 |
 | 8A | `AK-M08A` | P1 | `READY` | S | 없음 | green dependency PR을 순차 재검증·merge |
 | 8B | `AK-M08B` | P1 | `BLOCKED` | M | `AK-M08A` | Nest trio를 11.2.x default dev baseline으로 이동 |
 | 8C | `AK-M08C` | P1 | `BLOCKED` | M | `AK-M08A` | ESLint 10/typescript-eslint 8 toolchain 정렬 |
@@ -359,28 +359,36 @@ deep-freeze와 storage adapter record Date ownership은 각각 비범위와 `AK-
 
 ### `AK-M06A` — tenant ID producer ADR
 
-- 상태: `P1 / READY`
+- 상태: `P1 / DONE`
 - 문제: `create()`는 tenant ID를 검증/정규화하지 않고 저장한다. RBAC의 legacy path에는 trim/coerce 동작이 있어 producer와 consumer identity가 달라질 수 있다.
 
 완료 조건:
 
-- [ ] tenant ID의 empty/whitespace/runtime type/길이 정책을 reject/trim/preserve 중 명시적으로 선택한다.
-- [ ] API Keys가 canonical `request.apiKey` producer를 소유하고 RBAC가 trusted tenant reconciliation/authorization을 소유하는 경계를 고정한다.
-- [ ] 기존 non-canonical record의 reject/preserve/migration 정책과 semver를 기록한다.
-- [ ] 구현 파일은 바꾸지 않고 ADR·입력/legacy 표·`AK-M06B` migration checklist만 만든다.
+- [x] tenant ID의 empty/whitespace/runtime type/길이 정책을 reject/trim/preserve 중 명시적으로 선택한다.
+- [x] API Keys가 canonical `request.apiKey` producer를 소유하고 RBAC가 trusted tenant reconciliation/authorization을 소유하는 경계를 고정한다.
+- [x] 기존 non-canonical record의 reject/preserve/migration 정책과 semver를 기록한다.
+- [x] 구현 파일은 바꾸지 않고 ADR·입력/legacy 표·`AK-M06B` migration checklist만 만든다.
 
 검증: 현재 record/consumer inventory, `RBAC-M01`/`RBAC-M02` 계약 대조, 문서 link check.
 
+완료 결정(2026-08-30): [`2026-08-30-tenant-identity-contract-adr.md`](./2026-08-30-tenant-identity-contract-adr.md)에서
+tenant ID를 trim/coerce/Unicode normalize하지 않는 1–255 UTF-16 code unit opaque exact string으로
+고정했다. empty, non-string, leading/trailing whitespace, 초과 길이는 reject한다. API Keys는
+검증된 `request.apiKey` producer를, RBAC는 trusted tenant reconciliation과 authorization을 소유한다.
+기존 non-canonical row는 runtime repair하지 않고 coordinated migration 또는 credential 재발급한다.
+ADR 작성·inventory·migration checklist를 먼저 끝낸 뒤 별도 구현 단계인 `AK-M06B/C`를 진행했다.
+
 ### `AK-M06B` — tenant ID producer 계약 구현
 
-- 상태: `P1 / BLOCKED (AK-M06A, RBAC-M01과 RBAC-M02를 모두 포함한 published RBAC version)`
+- 상태: `P1 / BLOCKED (RBAC-M01과 RBAC-M02를 모두 포함한 published RBAC version)`;
+  API Keys producer 구현과 RED packed consumer는 완료했지만 외부 registry artifact가 없다.
 
 완료 조건:
 
-- [ ] create, list, event, context, storage가 `AK-M06A`의 canonical value를 사용한다.
-- [ ] invalid/non-canonical input은 storage mutation 전에 stable error로 처리한다.
+- [x] create, list, event, context, storage가 `AK-M06A`의 canonical value를 사용한다.
+- [x] invalid/non-canonical input은 storage mutation 전에 stable error로 처리한다.
 - [ ] published RBAC를 설치한 packed API Keys candidate consumer에서 canonical source와 trusted tenant mismatch가 fail closed한다.
-- [ ] candidate tarball의 version/source/integrity와 RBAC registry artifact를 검사하며 sibling checkout을 암묵적으로 사용하지 않는다.
+- [x] candidate tarball의 version/source/integrity와 RBAC registry artifact를 검사하며 sibling checkout을 암묵적으로 사용하지 않는다.
 - [ ] 이 packed consumer를 CI/release의 지속 gate로 추가한다.
 - [ ] API Keys task의 `DONE`은 packed pre-publish evidence로 판단한다. published-only full ecosystem 사후 검증은 `TEN-ECO-NEXT`가 소유한다.
 
@@ -388,57 +396,91 @@ deep-freeze와 storage adapter record Date ownership은 각각 비범위와 `AK-
 
 비범위: tenant membership 확인, tenancy package 직접 의존, 데이터 migration 실행기.
 
+부분 진행 결정(2026-08-30): `create()`와 `list()`는 storage 접근 전에 exact tenant를 검증하고,
+verify/list/rotate/revoke는 custom storage의 non-canonical record를 repair하지 않고 fail closed한다.
+`scripts/test-rbac-consumer.js`는 candidate tarball SHA-512와 registry RBAC version/gitHead/tarball/
+integrity를 검사한 뒤 Guard writer, canonical/legacy conflict, no-trim/coerce, trusted tenant mismatch를
+실행한다. npm latest `@nestarc/rbac@0.2.1` (`gitHead 69bf0e1`, integrity
+`sha512-9dqvRNC7sI3IKO/gUf6pRKbK4MSVvKXs0YgahYDsJkHZvhTMflYzaS5H9CnzViLMWuHV6eVmsXkWY8J52PVJ1w==`)
+는 conflicting `request.apiKeyContext`를 resolve해 예상대로 RED다. 이 버전의 gate를 CI/release에
+넣으면 main과 release가 항상 실패하므로, `RBAC-M01/M02` 포함 exact published version이 생길 때까지
+workflow 연결과 `DONE`을 보류한다.
+
 ### `AK-M06C` — tenant-bound management mutation 계약
 
-- 상태: `P1 / BLOCKED (AK-M02, AK-M06A)`; 선행 완료 뒤 `DECISION`으로 전환한다.
+- 상태: `P1 / DONE`
 - 문제: `list(tenantId)`는 이미 tenant-bound지만 public `revoke(id)`와 `rotate(id)`는 expected tenant를 받지 않아 library가 caller tenant와 record tenant의 일치를 강제할 수 없다.
 
 완료 조건:
 
-- [ ] service가 tenant boundary를 강제할지 trusted management layer가 소유할지 threat model과 public contract로 결정한다.
-- [ ] library가 소유하면 additive expected-tenant revoke/rotate API를 만들고 tenant B가 tenant A key를 mutation하지 못하는 InMemory/Prisma test를 둔다.
-- [ ] application이 소유하면 ID-only API의 신뢰 경계, 안전한 lookup/mutation recipe와 misuse warning을 문서화하고 deprecation 필요성을 결정한다.
-- [ ] `AK-M02`의 atomic rotation protocol을 우회하는 tenant check-then-rotate two-step을 만들지 않는다.
+- [x] service가 tenant boundary를 강제할지 trusted management layer가 소유할지 threat model과 public contract로 결정한다.
+- [x] library가 소유하면 additive expected-tenant revoke/rotate API를 만들고 tenant B가 tenant A key를 mutation하지 못하는 InMemory/Prisma test를 둔다.
+- [x] application이 소유하면 ID-only API의 신뢰 경계, 안전한 lookup/mutation recipe와 misuse warning을 문서화하고 deprecation 필요성을 결정한다.
+- [x] `AK-M02`의 atomic rotation protocol을 우회하는 tenant check-then-rotate two-step을 만들지 않는다.
 
 검증: ADR, tenant A/B mutation table, 선택 시 packed management consumer.
 
+완료 결정(2026-08-30): library-owned additive `revokeForTenant(tenantId, id)`와
+`rotateForTenant(tenantId, id, input)`를 제공한다. missing과 mismatch는 모두
+`api_key_record_not_found`다. built-in InMemory/Prisma adapter는 expected tenant를 revoke
+`updateMany`와 rotation transaction/CAS 조건에 포함한다. custom adapter capability가 없으면
+ID-only mutation으로 fallback하지 않고 fail fast한다. 기존 `revoke(id)`/`rotate(id)`는 trusted
+system-wide management 호환 경로로 유지하고 deprecate하지 않지만 tenant authorization을 보장하지
+않음을 README에 명시했다. Nest 10/11 packed consumers가 cross-tenant revoke 거절과 tenant-bound
+rotate/revoke 성공을 runtime으로 검증한다.
+
 ### `AK-M07A` — verification과 authorization telemetry 의미 분리
 
-- 상태: `P1 / READY (AK-M01 DONE)`
+- 상태: `P1 / DONE`
 - 문제: service verify 성공 뒤 Guard의 environment/IP/scope 거절이 발생해도 `lastUsedAt`, optional `api_key.used`, success metric이 이미 기록된다.
 
 완료 조건:
 
-- [ ] credential verification 성공과 요청 authorization 성공을 서로 다른 용어와 event/metric으로 정의한다.
-- [ ] Guard 403을 성공 사용으로 기록할지, 별도 denial로 기록할지 ADR로 결정한다.
-- [ ] missing Authorization header처럼 service 호출 전 실패하는 요청의 `auth_failed` event/metric 의미도 결정한다.
-- [ ] 선택한 의미가 last-used, usage event, auth-failed event, metrics에 일관된다.
-- [ ] service-only/custom transport 사용자를 깨뜨리지 않는 API를 제공한다.
-- [ ] denial payload에는 raw key, IP, tenant/key high-cardinality 값이 기본 포함되지 않는다.
+- [x] credential verification 성공과 요청 authorization 성공을 서로 다른 용어와 event/metric으로 정의한다.
+- [x] Guard 403을 성공 사용으로 기록할지, 별도 denial로 기록할지 ADR로 결정한다.
+- [x] missing Authorization header처럼 service 호출 전 실패하는 요청의 `auth_failed` event/metric 의미도 결정한다.
+- [x] 선택한 의미가 last-used, usage event, auth-failed event, metrics에 일관된다.
+- [x] service-only/custom transport 사용자를 깨뜨리지 않는 API를 제공한다.
+- [x] denial payload에는 raw key, IP, tenant/key high-cardinality 값이 기본 포함되지 않는다.
 
 검증: missing/environment/IP/scope Guard table, service-only verify tests, event/metric cardinality test.
 
 비범위: durable audit sink, application rate limiting.
 
+완료 결정(2026-08-30): [`request authorization telemetry ADR`](./2026-08-30-request-authorization-telemetry-adr.md)에
+따라 `verify()`는 credential-only 호환 primitive로 유지하고 direct 호출 성공은 기존처럼 accepted
+use로 기록한다. 새 `authorizeRequest()`와 Guard는 credential verification 뒤 environment/IP/scope
+authorization까지 성공해야 `lastUsedAt`과 opt-in `api_key.used`를 기록한다. missing은 credential
+attempt가 아니므로 `api_key.auth_failed`/verification metric을 만들지 않고, credential failure는 기존
+auth-failed/verification 의미를 유지한다. request denial은 key/tenant/raw key/IP를 제외한
+`api_key.authorization_denied`와 별도 저카디널리티 `api_key.authorization` metric으로 기록한다.
+
 ### `AK-M07B` — Guard 밖 IP allowlist 계약
 
-- 상태: `P1 / DECISION (AK-M01 DONE)`
+- 상태: `P1 / DONE`
 - 문제: public `verify(rawKey)`는 record의 IP 제한을 반환할 뿐 enforcement하지 않고 Guard만 IP를 검사한다. custom transport/direct-service consumer가 advertised restriction을 자동 적용한다고 오해할 수 있다.
 
 완료 조건:
 
-- [ ] `verify()`를 credential-only primitive로 명명/문서화할지, request-aware 검증 API를 additive로 제공할지 ADR로 결정한다.
-- [ ] 제한 key를 request-aware path에서 IP 없이 검증하면 fail closed한다.
-- [ ] Guard와 custom transport recipe가 같은 request-aware primitive/policy를 사용한다.
-- [ ] 기존 direct-service 사용자의 compatibility와 semver를 기록하고 IP enforcement 보증 범위를 README/spec에 명시한다.
+- [x] `verify()`를 credential-only primitive로 명명/문서화할지, request-aware 검증 API를 additive로 제공할지 ADR로 결정한다.
+- [x] 제한 key를 request-aware path에서 IP 없이 검증하면 fail closed한다.
+- [x] Guard와 custom transport recipe가 같은 request-aware primitive/policy를 사용한다.
+- [x] 기존 direct-service 사용자의 compatibility와 semver를 기록하고 IP enforcement 보증 범위를 README/spec에 명시한다.
 
 검증: HTTP/custom-transport/IP resolver table, packed direct-service consumer.
 
 비범위: trusted proxy 자동 설정, application rate limiting.
 
+완료 결정(2026-08-30): additive `authorizeRequest({ rawKey, clientIp | request,
+clientIpResolver, requiredEnvironment, requiredScope })`를 공개하고 Guard가 같은 primitive를 사용한다.
+제한 key는 explicit/resolved client IP가 없거나 allowlist 밖이면 `api_key_ip_not_allowed`로 fail
+closed한다. `verify()`는 stored IP/environment/scope policy를 반환하지만 집행하지 않는 credential-only
+API로 유지한다. Nest 10/11 strict packed direct consumers가 제한 key의 direct `verify()` 성공,
+request-aware missing-IP 거절, 허용 IP 성공과 public declaration을 검증했다.
+
 ### `AK-M14` — legacy observer failure isolation
 
-- 상태: `P1 / BLOCKED (AK-M07A)`
+- 상태: `P1 / READY (AK-M07A DONE)`
 
 완료 조건:
 
@@ -819,7 +861,8 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 - [x] `AK-M04`: runtime environment/scope와 generated key parse/verify/redact property contract
 - [x] `AK-M05`: observer/contextWriter whole-object mutation negative contract
 - [ ] `AK-M06B`: packed API Keys candidate → published RBAC canonical/conflict consumer
-- [ ] `AK-M07A`: missing/denial telemetry semantics; `AK-M07B`: request-aware IP restriction contract
+- [x] `AK-M06C`: tenant-bound revoke update와 rotation CAS의 InMemory/Prisma/packed consumer contract
+- [x] `AK-M07A`: missing/denial telemetry semantics; `AK-M07B`: request-aware IP restriction contract
 - [ ] `AK-M09`: selected Node minimum/24 source lanes
 - [ ] `AK-M10`: PostgreSQL 14/16와 no-Prisma packed consumer
 - [ ] `AK-M11`: fresh coverage threshold
@@ -830,13 +873,20 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 
 ## 10. 다음 세션 권장 시작점
 
-1. 현재 worktree의 `AK-M05` diff를 검토하고 이 변경만 별도 P1 commit/PR로 종료한다.
-2. merge 뒤 최신 main에서 새 branch/worktree를 만든다.
-3. 실행 큐상 다음인 `AK-M06A`만 선택한다.
-4. 현재 저장된 tenant ID 형태와 RBAC 소비 계약을 목록화하고 reject/trim/preserve 정책 ADR을 먼저 만든다.
-5. AK-M01~M05의 인증, atomic rotation, 시간값, runtime input, observer/context 불변성 계약을 회귀 gate로 유지한다.
+1. `AK-M06A/C`와 `AK-M06B`의 API Keys-side diff를 검토해 계획된 0.4.0 P1 PR 경계를
+   결정한다. `AK-M06B`를 `DONE`으로 표시하거나 RBAC gate를 workflow에 연결하지 않는다.
+2. RBAC 저장소에서 `RBAC-M01`과 `RBAC-M02`를 각각 완료하고 둘 다 포함한 exact registry
+   version을 publish한다.
+3. 이 저장소에서 `npm run test:consumer:rbac -- --rbac <exact-version>`을 실행한다. PASS일 때만
+   `.github/workflows/ci.yml`과 `release.yml`에 같은 exact version의 persistent gate를 추가한다.
+4. profile A/B/D와 packed RBAC consumer를 다시 통과시켜 `AK-M06B`를 `DONE` 처리하고,
+   tenancy-owned `TEN-ECO-NEXT`에 published package tuple을 인계한다.
+5. `AK-M07A/B`는 완료됐다. 외부 RBAC release를 기다리는 동안 다음 순서의 실행 가능한 작업은
+   `AK-M14`이며, observer sync throw/async reject가 원래 인증 오류와 새 telemetry를 바꾸지 않는
+   RED table부터 추가한다.
 
-`AK-M04`와 `AK-M05`를 한 PR에 넣지 않는다. dependency/toolchain 변경도 P1 수정과 섞지 않는다.
+Published RBAC 0.2.1은 `request.apiKeyContext` conflict와 trim/coerce 계약 때문에 의도적으로
+RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증거로 사용하지 않는다.
 
 ## 11. 작업 기록
 
@@ -848,6 +898,11 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 | 2026-08-30 | `AK-M03` | `DONE` | `c6c343a` | `c6c343a + worktree` (PR/release 없음) | profile A 11 suites/116 tests, profile B 86.82/81.85/83.11/86.49, Prisma 5/6/7 PostgreSQL 각 18 tests, build/audit PASS | AK-M03 단독 P1 PR 뒤 `AK-M04` 시작 |
 | 2026-08-30 | `AK-M04` | `DONE` | `2a867ca` | `2a867ca + worktree` (PR/release 없음) | profile A 11 suites/148 tests, profile B 87.54/83.26/84.70/87.30, build/pack 46 entries/bench/audit PASS | AK-M04 단독 0.4.0 P1 PR 뒤 `AK-M05` 시작 |
 | 2026-08-30 | `AK-M05` | `DONE` | `3477505` | `3477505 + worktree` (PR/release 없음) | profile A 11 suites/151 tests, profile B 88.03/84.49/85.22/87.79, malicious observer/writer와 실제 RBAC resolver PASS | AK-M05 단독 P1 PR 뒤 `AK-M06A` 시작 |
+| 2026-08-30 | `AK-M06A` | `DONE` | `f3a1bed` | `f3a1bed + worktree` (PR/release 없음) | tenant input/legacy inventory, RBAC-M01/M02 대조, ADR/migration checklist와 link 확인 | API Keys producer 구현 뒤 published RBAC prerequisite 재확인 |
+| 2026-08-30 | `AK-M06B` | `BLOCKED` | `f3a1bed` | `f3a1bed + worktree` (PR/release 없음) | API Keys canonical producer와 packed consumer 작성; published RBAC 0.2.1 conflict RED, profile A/B/D와 package matrix 나머지 PASS | RBAC-M01/M02 포함 version publish 뒤 consumer PASS와 CI/release gate 추가 |
+| 2026-08-30 | `AK-M06C` | `DONE` | `f3a1bed` | `f3a1bed + worktree` (PR/release 없음) | InMemory + Prisma 5/6/7 각 20 tests, Nest 10/11 packed management runtime PASS | AK-M06C 범위 완료; M06B 외부 prerequisite 또는 AK-M07A 진행 |
+| 2026-08-30 | `AK-M07A` | `DONE` | `f3a1bed` | `f3a1bed + worktree` (PR/release 없음) | 12 suites/184 tests, coverage 87.91/83.02/85.04/87.70, Guard missing/denial telemetry table PASS | `AK-M14` observer isolation RED table |
+| 2026-08-30 | `AK-M07B` | `DONE` | `f3a1bed` | `f3a1bed + worktree` (PR/release 없음) | Nest 10/11 strict direct + HTTP packed consumers, request-aware IP table PASS | AK-M07A/B 변경을 함께 검토·commit |
 
 ### AK-M01 종료 인계
 
@@ -1024,4 +1079,154 @@ Unverified paths and reason: remote GitHub CI/release jobs은 push 전이라 미
 External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
 Next exact action: AK-M05 파일만 검토·commit해 별도 P1 PR로 merge한 뒤 AK-M06A에서 현재 tenant ID
   producer/consumer 형태를 목록화하고 reject/trim/preserve 정책 ADR을 작성한다.
+```
+
+### AK-M06A 종료 인계
+
+```text
+Task: AK-M06A
+State: DONE
+Start ref / end ref: f3a1bed / f3a1bed + session worktree (commit·PR·release 없음)
+Changed files: docs/2026-08-30-tenant-identity-contract-adr.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: tenant ID는 1–255 UTF-16 code unit exact string이며 empty, runtime non-string,
+  leading/trailing whitespace를 reject한다. internal whitespace/Unicode는 보존하고 trim/coerce,
+  case fold, normalization하지 않는다. API Keys는 request.apiKey producer, RBAC는 trusted tenant
+  reconciliation/authorization을 소유한다. legacy row는 coordinated migration 또는 key 재발급한다.
+Commands and exact results:
+  current source/storage/RBAC 0.2.1 tarball inventory => API Keys exact storage/list와 RBAC
+    apiKeyContext-first trim/number-coerce 차이를 확인
+  ADR relative link check => PASS; packaged README link는 package files 밖 문서이므로 absolute GitHub link
+Unverified paths and reason: 없음; 이 task는 ADR·inventory·migration checklist만 소유한다.
+External PR/release evidence: npm @nestarc/rbac latest 0.2.1 metadata를 확인했으며 M01/M02 미포함.
+Next exact action: API Keys producer 구현을 유지하고 RBAC-M01/M02 포함 published artifact를 기다린다.
+```
+
+### AK-M06B 종료 인계
+
+```text
+Task: AK-M06B
+State: BLOCKED
+Start ref / end ref: f3a1bed / f3a1bed + session worktree (commit·PR·release 없음)
+Changed files: src/input-validation.ts, src/input-validation.test.ts, src/api-keys.service.ts,
+  src/index.ts, test/integration/api-keys.service.test.ts, scripts/test-rbac-consumer.js,
+  package.json, scripts/test-strict-consumer.js, README.md, CHANGELOG.md,
+  docs/2026-08-30-tenant-identity-contract-adr.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: ADR exact tenant를 create/list/storage/event/context에 사용하고 custom storage의
+  invalid record는 repair하지 않고 fail closed한다. packed RBAC consumer는 candidate와 registry
+  artifact identity를 검증하며 sibling checkout을 사용하지 않는다.
+Commands and exact results:
+  RED: npm test -- --runInBand test/integration/api-keys.service.test.ts
+    => expected FAIL; invalid tenant 6 cases failed, remaining 68 passed
+  external RED: npm run test:consumer:rbac -- --rbac 0.2.1
+    => exact packages installed; FAIL because RBAC resolved conflicting request.apiKeyContext
+  npm run lint => PASS
+  ./node_modules/.bin/tsc --noEmit -p tsconfig.build.json => PASS
+  npm test -- --runInBand => 12 suites, 179 tests PASS
+  fresh Jest coverage (/tmp/api-keys-m06-coverage-20260830-01) => statements 87.45%,
+    branches 82.82%, functions 83.83%, lines 87.21%
+  npm run build => PASS
+  npm_config_cache=/tmp/api-keys-m06-npm-cache npm pack --dry-run --json
+    => PASS, 48 entries, sha512-zs5jigyIUbMBdx6tJGeYJ0BKNC8ZgqpyxqtOMG+dtAQapoYPvpMeWyeXP0W951eEe9r6OV6hRYUj3SZSjcCAQw==
+  npm run bench:smoke => PASS; local |unknown-known invalid| p50 0.3µs, bound 500µs
+  npm audit --omit=dev --json => production vulnerabilities 0
+  git diff --check => PASS
+Unverified paths and reason: canonical/trusted conflict PASS와 CI/release persistent gate는
+  RBAC-M01/M02 포함 published version이 없어 불가능하다. 0.2.1 gate를 workflow에 넣으면 항상 RED다.
+External PR/release evidence: @nestarc/rbac@0.2.1, gitHead 69bf0e192865566e67627f9cf5c1c35fcb458103,
+  registry integrity sha512-9dqvRNC7sI3IKO/gUf6pRKbK4MSVvKXs0YgahYDsJkHZvhTMflYzaS5H9CnzViLMWuHV6eVmsXkWY8J52PVJ1w==.
+Next exact action: RBAC-M01/M02 포함 exact version publish 뒤 test:consumer:rbac PASS, CI/release 연결,
+  profile A/B/D 재실행 후 DONE 처리한다.
+```
+
+### AK-M06C 종료 인계
+
+```text
+Task: AK-M06C
+State: DONE
+Start ref / end ref: f3a1bed / f3a1bed + session worktree (commit·PR·release 없음)
+Changed files: src/api-keys.service.ts, src/storage/api-key-storage.interface.ts,
+  src/storage/in-memory-storage.ts, src/storage/prisma-storage.ts, src/index.ts,
+  test/contract/storage-contract.ts, test/integration/api-keys.service.test.ts,
+  scripts/test-strict-consumer.js, README.md, CHANGELOG.md,
+  docs/2026-08-30-tenant-identity-contract-adr.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: additive revokeForTenant/rotateForTenant이 expected tenant를 atomic adapter
+  mutation에 bind한다. mismatch와 missing은 api_key_record_not_found이며 custom capability 부재는
+  ID-only fallback 없이 fail-fast한다. 기존 ID-only API는 trusted system-wide management용으로 유지한다.
+Commands and exact results:
+  InMemory contract + service tenant A/B negative/positive table => PASS in 12 suites/179 tests
+  Prisma 5.22.0/6.19.3/7.10.0 PostgreSQL 16 => 각 1 suite, 20 tests PASS
+  first parallel Prisma 6/7 attempt => Prisma 7 20 PASS, Prisma 6 generated-path collision FAIL;
+    documented shared generated path 때문에 Prisma 6을 단독 재실행해 20 PASS
+  npm run test:consumer:strict:legacy => exact Nest 10.4.20/Prisma 6.19.3 packed management PASS
+  npm run test:consumer:strict:modern => exact Nest 11.2.1/Prisma 7.10.0 packed management PASS
+  profile A/B/D 결과는 AK-M06B 인계와 동일하게 PASS
+Unverified paths and reason: remote GitHub CI/release는 push 전이라 미실행. tenant-bound built-in
+  path는 전체 local matrix와 packed consumer에서 검증했다.
+External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
+Next exact action: AK-M06C는 완료. M06B external prerequisite 충족 뒤 packed RBAC gate를 활성화한다.
+```
+
+### AK-M07A/B 종료 인계
+
+```text
+Task: AK-M07A
+State: DONE
+Start ref / end ref: f3a1bed / f3a1bed + session worktree (commit·PR·release 없음)
+Changed files: src/types.ts, src/payload-copy.ts, src/api-keys.service.ts,
+  src/api-keys.guard.ts, src/api-keys.module.ts, src/api-keys.module.test.ts,
+  test/integration/api-keys.service.test.ts, test/integration/api-keys.guard.test.ts,
+  scripts/test-strict-consumer.js, README.md, CHANGELOG.md,
+  docs/2026-08-30-request-authorization-telemetry-adr.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: verification은 supplied credential의 format/secret/lifecycle 성공 여부이고,
+  authorization은 missing credential과 environment/IP/scope request policy를 포함한다. Guard 403은
+  verification success와 별도 authorization denial이며 accepted usage는 아니다. missing은
+  auth_failed/verification metric을 만들지 않는다. request denial event/metric은 raw key, IP,
+  prefix, tenant/key ID, scope, route를 포함하지 않는다.
+Commands and exact results:
+  RED: npm test -- --runInBand test/integration/api-keys.service.test.ts
+    test/integration/api-keys.guard.test.ts => expected FAIL; 2 suites failed to compile because
+    ApiKeyAuthorizationMetric, authorizeRequest(), onAuthorizationMetric contract가 없었음
+  npm run lint => PASS
+  ./node_modules/.bin/tsc --noEmit -p tsconfig.build.json => PASS
+  npm test -- --runInBand => 12 suites, 184 tests PASS
+  fresh Jest coverage (/tmp/api-keys-m07-coverage.No3g85) => statements 87.91%,
+    branches 83.02%, functions 85.04%, lines 87.70%; guard statements/lines 100%
+  npm run test:consumer:http:nest10 => exact Nest 10.4.20 HTTP Guard PASS
+  npm run test:consumer:http:nest11 => exact Nest 11.2.1 HTTP Guard PASS
+  npm run build => PASS
+  npm pack --dry-run --json => PASS, 48 entries,
+    sha512-/CD8EZyQxHiELdgPUcLGnDT9Lzy2UTPnFGrbso8sNWomop63dVn/+nXuHTDfTy/rBLPB7W780LejwJbSZ0BmVg==
+  npm run bench:smoke => PASS; local |unknown-known invalid| p50 0.1µs, bound 500µs
+  npm audit --omit=dev --json => production vulnerabilities 0
+  git diff --check => PASS
+Unverified paths and reason: remote GitHub CI/release는 push 전이라 미실행. storage/schema를
+  변경하지 않아 Prisma real DB matrix는 재실행하지 않았고 service/Guard InMemory contract와
+  packed Nest consumers로 이 작업의 telemetry 경계를 검증했다.
+External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
+Next exact action: AK-M14에서 legacy onAuthFailed sync throw/thenable/async reject와 reporting
+  callback 실패가 원래 ApiKeyError 및 AK-M07A telemetry를 바꾸지 않는 RED table을 추가한다.
+```
+
+```text
+Task: AK-M07B
+State: DONE
+Start ref / end ref: f3a1bed / f3a1bed + session worktree (commit·PR·release 없음)
+Changed files: AK-M07A와 동일
+Contract decision: verify(rawKey)는 기존 credential-only API로 유지한다. additive
+  authorizeRequest()가 required environment/scope와 explicit/resolved client IP를 집행하며 Guard와
+  custom transport가 같은 primitive를 사용한다. 제한 key의 client IP가 없으면 fail closed한다.
+Commands and exact results:
+  service-only/request-aware IP RED와 Guard missing/environment/IP/scope table => 12 suites,
+    184 tests PASS
+  npm run test:consumer:strict:legacy => exact Nest 10.4.20/Prisma 6.19.3 packed direct consumer PASS
+  npm run test:consumer:strict:modern => exact Nest 11.2.1/Prisma 7.10.0 packed direct consumer PASS
+  Nest 10/11 HTTP packed consumers, profile A/B/D => AK-M07A 인계 결과와 같이 PASS
+Unverified paths and reason: remote GitHub CI/release는 push 전이라 미실행. trusted proxy 자동
+  설정은 비범위이며 default resolver는 계속 request.ip만 사용한다.
+External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
+Next exact action: AK-M07A/B 파일을 같은 request-boundary 변경으로 검토·commit한 뒤 AK-M14를 진행한다.
 ```

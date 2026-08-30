@@ -1,4 +1,9 @@
-import type { ApiKeyContext, ApiKeyEvent, ApiKeyVerificationMetric } from './types';
+import type {
+  ApiKeyAuthorizationMetric,
+  ApiKeyContext,
+  ApiKeyEvent,
+  ApiKeyVerificationMetric,
+} from './types';
 
 export function copyApiKeyContext(context: ApiKeyContext): ApiKeyContext {
   return {
@@ -30,6 +35,7 @@ export function copyApiKeyEvent(event: ApiKeyEvent): ApiKeyEvent {
       };
     case 'api_key.revoked':
     case 'api_key.auth_failed':
+    case 'api_key.authorization_denied':
       return {
         ...event,
         at,
@@ -40,5 +46,11 @@ export function copyApiKeyEvent(event: ApiKeyEvent): ApiKeyEvent {
 export function copyApiKeyVerificationMetric(
   metric: ApiKeyVerificationMetric,
 ): ApiKeyVerificationMetric {
+  return { ...metric };
+}
+
+export function copyApiKeyAuthorizationMetric(
+  metric: ApiKeyAuthorizationMetric,
+): ApiKeyAuthorizationMetric {
   return { ...metric };
 }

@@ -5,11 +5,16 @@ import {
 } from '../../src/errors';
 import { ApiKeysService } from '../../src/api-keys.service';
 import { Sha256Hasher } from '../../src/hasher';
-import { API_KEY_REDACT_REGEX, parseKey } from '../../src/key-format';
+import { API_KEY_REDACT_REGEX, generateKey, parseKey } from '../../src/key-format';
 import type { ApiKeyStorage } from '../../src/storage/api-key-storage.interface';
 import { InMemoryApiKeyStorage } from '../../src/storage/in-memory-storage';
 import { PrismaApiKeyStorage, type PrismaLike } from '../../src/storage/prisma-storage';
-import type { ApiKeyEvent, ApiKeyRecord, ApiKeyVerificationMetric } from '../../src/types';
+import type {
+  ApiKeyAuthorizationMetric,
+  ApiKeyEvent,
+  ApiKeyRecord,
+  ApiKeyVerificationMetric,
+} from '../../src/types';
 
 interface RotatableService extends ApiKeysService {
   rotate(
@@ -32,6 +37,11 @@ function svc(
     onEventError: (error: unknown, event: ApiKeyEvent) => void;
     onMetric: (metric: ApiKeyVerificationMetric) => void | Promise<void>;
     onMetricError: (error: unknown, metric: ApiKeyVerificationMetric) => void;
+    onAuthorizationMetric: (metric: ApiKeyAuthorizationMetric) => void | Promise<void>;
+    onAuthorizationMetricError: (
+      error: unknown,
+      metric: ApiKeyAuthorizationMetric,
+    ) => void;
     monotonicClock: () => number;
     emitUsageEvents: boolean;
     debounceMs: number;
@@ -61,6 +71,8 @@ function svc(
     onEventError: overrides.onEventError,
     onMetric: overrides.onMetric,
     onMetricError: overrides.onMetricError,
+    onAuthorizationMetric: overrides.onAuthorizationMetric,
+    onAuthorizationMetricError: overrides.onAuthorizationMetricError,
     monotonicClock: overrides.monotonicClock,
     emitUsageEvents: overrides.emitUsageEvents,
     ttlPolicy: overrides.ttlPolicy,
@@ -90,6 +102,12 @@ function prismaStorageSpy(): {
 
 describe('ApiKeysService.create', () => {
   it.each([
+    ['non-string tenant', { tenantId: 42 }],
+    ['empty tenant', { tenantId: '' }],
+    ['whitespace tenant', { tenantId: '   ' }],
+    ['leading-whitespace tenant', { tenantId: ' tenant_a' }],
+    ['trailing-whitespace tenant', { tenantId: 'tenant_a ' }],
+    ['oversized tenant', { tenantId: 't'.repeat(256) }],
     ['invalid environment', { environment: 'prod' }],
     ['empty resource', { scopes: [{ resource: '', level: 'read' }] }],
     ['resource delimiter', { scopes: [{ resource: 'reports:admin', level: 'read' }] }],
@@ -177,6 +195,29 @@ describe('ApiKeysService.create', () => {
     expect(stored.hash).not.toContain(result.key);
     expect(stored.scopes).toEqual(['invoices:write']);
     expect(stored.environment).toBe('live');
+  });
+
+  it('preserves the exact canonical tenant through storage, events, list, and context', async () => {
+    const events: ApiKeyEvent[] = [];
+    const tenantId = 'tenant café';
+    const { service, storage } = svc({
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    const result = await service.create({
+      tenantId,
+      name: 'exact tenant',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+
+    await expect(storage.findById(result.id)).resolves.toMatchObject({ tenantId });
+    await expect(service.list(tenantId)).resolves.toEqual([
+      expect.objectContaining({ tenantId }),
+    ]);
+    await expect(service.verify(result.key)).resolves.toMatchObject({ tenantId });
+    expect(events[0]).toMatchObject({ type: 'api_key.created', tenantId });
   });
 
   it('defaults environment to live', async () => {
@@ -394,6 +435,64 @@ describe('ApiKeysService.rotate', () => {
     await expect(rotatable.rotate(created.id)).rejects.toMatchObject({
       code: 'api_key_not_rotatable',
     });
+  });
+
+  it('tenant-bound rotation hides cross-tenant records and creates no replacement', async () => {
+    const { service, storage } = svc();
+    const created = await service.create({
+      tenantId: 'tenant_a',
+      name: 'tenant A key',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+
+    await expect(
+      service.rotateForTenant('tenant_b', created.id),
+    ).rejects.toMatchObject({ code: ApiKeyOperationErrorCode.NotFound });
+    await expect(storage.listByTenant('tenant_a')).resolves.toEqual([
+      expect.objectContaining({ id: created.id, rotatedAt: null, replacedByKeyId: null }),
+    ]);
+
+    const rotated = await service.rotateForTenant('tenant_a', created.id);
+    await expect(service.verify(rotated.key)).resolves.toMatchObject({
+      tenantId: 'tenant_a',
+      keyId: rotated.id,
+    });
+  });
+
+  it('tenant-bound rotation fails fast for a custom storage without the atomic capability', async () => {
+    const oldRecord: ApiKeyRecord = {
+      id: 'key_1',
+      tenantId: 'tenant_a',
+      name: 'old key',
+      environment: 'live',
+      prefix: 'abcdefghijkl',
+      hash: 'f'.repeat(64),
+      pepperVersion: 1,
+      scopes: ['reports:read'],
+      lastUsedAt: null,
+      expiresAt: null,
+      revokedAt: null,
+      rotatedAt: null,
+      replacedByKeyId: null,
+      createdBy: null,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    const storage = {
+      insert: jest.fn(),
+      findById: jest.fn().mockResolvedValue(oldRecord),
+      findByPrefix: jest.fn(),
+      listByTenant: jest.fn(),
+      markRevoked: jest.fn(),
+      touchLastUsed: jest.fn(),
+      rotate: jest.fn(),
+    } as ApiKeyStorage;
+    const { service } = svc({ storage });
+
+    await expect(service.rotateForTenant('tenant_a', oldRecord.id)).rejects.toThrow(
+      'ApiKeyStorage.rotateForTenant() is required for tenant-bound rotation',
+    );
+    expect(storage.findById).not.toHaveBeenCalled();
+    expect(storage.rotate).not.toHaveBeenCalled();
   });
 
   it('allows exactly one concurrent rotation and rejects every loser as not rotatable', async () => {
@@ -1156,6 +1255,182 @@ describe('ApiKeysService verification metrics', () => {
   });
 });
 
+describe('ApiKeysService request authorization', () => {
+  it('keeps verify credential-only while request-aware authorization fails closed without an IP', async () => {
+    const events: ApiKeyEvent[] = [];
+    const authorizationMetrics: ApiKeyAuthorizationMetric[] = [];
+    const { service, storage } = svc({
+      emitUsageEvents: true,
+      onEvent: (event) => {
+        events.push(event);
+      },
+      onAuthorizationMetric: (metric) => {
+        authorizationMetrics.push(metric);
+      },
+    });
+    const created = await service.create({
+      tenantId: 'tenant_request',
+      name: 'restricted',
+      scopes: [{ resource: 'reports', level: 'read' }],
+      allowedIpCidrs: ['203.0.113.0/24'],
+    });
+
+    await expect(service.verify(created.key)).resolves.toMatchObject({ keyId: created.id });
+    events.splice(0, events.length);
+    await storage.touchLastUsed(created.id, new Date('2025-01-01T00:00:00Z'));
+
+    await expect(
+      service.authorizeRequest({ rawKey: created.key }),
+    ).rejects.toMatchObject({ code: ApiKeyErrorCode.IpNotAllowed });
+
+    const [deniedRecord] = await storage.listByTenant('tenant_request');
+    expect(deniedRecord.lastUsedAt?.toISOString()).toBe('2025-01-01T00:00:00.000Z');
+    expect(events).toEqual([
+      {
+        type: 'api_key.authorization_denied',
+        at: new Date('2026-01-01T00:00:00.000Z'),
+        code: ApiKeyErrorCode.IpNotAllowed,
+      },
+    ]);
+    expect(authorizationMetrics).toEqual([
+      expect.objectContaining({
+        type: 'api_key.authorization',
+        outcome: 'ip_denied',
+        environment: 'live',
+      }),
+    ]);
+    expect(Object.keys(authorizationMetrics[0]).sort()).toEqual([
+      'durationMs',
+      'environment',
+      'outcome',
+      'type',
+    ]);
+    const serializedMetric = JSON.stringify(authorizationMetrics[0]);
+    expect(serializedMetric).not.toContain(created.id);
+    expect(serializedMetric).not.toContain('tenant_request');
+    expect(serializedMetric).not.toContain(created.key);
+    expect(serializedMetric).not.toContain('203.0.113');
+    const serializedDenial = JSON.stringify(events[0]);
+    expect(serializedDenial).not.toContain(created.id);
+    expect(serializedDenial).not.toContain('tenant_request');
+    expect(serializedDenial).not.toContain(created.key);
+    expect(serializedDenial).not.toContain('203.0.113');
+  });
+
+  it('records accepted request usage only after environment, IP, and scope authorization pass', async () => {
+    const events: ApiKeyEvent[] = [];
+    const { service, storage } = svc({
+      emitUsageEvents: true,
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    const created = await service.create({
+      tenantId: 'tenant_request',
+      name: 'restricted',
+      environment: 'test',
+      scopes: [{ resource: 'reports', level: 'write' }],
+      allowedIpCidrs: ['203.0.113.0/24'],
+    });
+    events.splice(0, events.length);
+
+    await expect(
+      service.authorizeRequest({
+        rawKey: created.key,
+        clientIp: '203.0.113.42',
+        requiredEnvironment: 'test',
+        requiredScope: { resource: 'reports', level: 'read' },
+      }),
+    ).resolves.toMatchObject({ keyId: created.id, tenantId: 'tenant_request' });
+
+    const [record] = await storage.listByTenant('tenant_request');
+    expect(record.lastUsedAt?.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+    expect(events.map((event) => event.type)).toEqual(['api_key.used']);
+  });
+
+  it('separates a missing credential from credential verification failure telemetry', async () => {
+    const events: ApiKeyEvent[] = [];
+    const verificationMetrics: ApiKeyVerificationMetric[] = [];
+    const authorizationMetrics: ApiKeyAuthorizationMetric[] = [];
+    const { service } = svc({
+      onEvent: (event) => {
+        events.push(event);
+      },
+      onMetric: (metric) => {
+        verificationMetrics.push(metric);
+      },
+      onAuthorizationMetric: (metric) => {
+        authorizationMetrics.push(metric);
+      },
+    });
+
+    await expect(service.authorizeRequest({})).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Missing,
+    });
+    await expect(service.authorizeRequest({ rawKey: 'garbage' })).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Malformed,
+    });
+
+    expect(events.map((event) => [event.type, 'code' in event ? event.code : undefined])).toEqual([
+      ['api_key.authorization_denied', ApiKeyErrorCode.Missing],
+      ['api_key.auth_failed', ApiKeyErrorCode.Malformed],
+      ['api_key.authorization_denied', ApiKeyErrorCode.Malformed],
+    ]);
+    expect(verificationMetrics.map((metric) => metric.outcome)).toEqual(['malformed']);
+    expect(authorizationMetrics.map((metric) => metric.outcome)).toEqual([
+      'missing',
+      'credential_rejected',
+    ]);
+  });
+
+  it('isolates synchronous and asynchronous authorization metric sink failures', async () => {
+    const syncMetricError = jest.fn();
+    const sync = svc({
+      onAuthorizationMetric: (metric) => {
+        metric.outcome = 'error';
+        metric.durationMs = 999;
+        throw new Error('sync authorization metric sink down');
+      },
+      onAuthorizationMetricError: syncMetricError,
+    });
+    const syncKey = await sync.service.create({
+      tenantId: 't1',
+      name: 'sync',
+      scopes: [{ resource: 'r', level: 'read' }],
+    });
+
+    await expect(
+      sync.service.authorizeRequest({ rawKey: syncKey.key }),
+    ).resolves.toMatchObject({ keyId: syncKey.id });
+    expect(syncMetricError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ outcome: 'success' }),
+    );
+    expect(syncMetricError.mock.calls[0]?.[1]).not.toMatchObject({ durationMs: 999 });
+
+    const asyncMetricError = jest.fn();
+    const asyncSink = svc({
+      onAuthorizationMetric: () =>
+        Promise.reject(new Error('async authorization metric sink down')),
+      onAuthorizationMetricError: asyncMetricError,
+    });
+    const asyncKey = await asyncSink.service.create({
+      tenantId: 't1',
+      name: 'async',
+      scopes: [{ resource: 'r', level: 'read' }],
+    });
+
+    await expect(
+      asyncSink.service.authorizeRequest({ rawKey: asyncKey.key }),
+    ).resolves.toMatchObject({ keyId: asyncKey.id });
+    await Promise.resolve();
+    expect(asyncMetricError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ outcome: 'success' }),
+    );
+  });
+});
+
 describe('ApiKeysService.verify', () => {
   it('returns context for a valid key', async () => {
     const { service } = svc();
@@ -1170,6 +1445,53 @@ describe('ApiKeysService.verify', () => {
     expect(context.tenantId).toBe('t1');
     expect(context.scopes).toEqual(['invoices:write']);
     expect(context.environment).toBe('live');
+  });
+
+  it('fails closed instead of repairing a non-canonical persisted tenant ID', async () => {
+    const generated = generateKey({ namespace: 'nk', environment: 'live' });
+    const hasher = new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 });
+    const hashed = hasher.hash(generated.secret);
+    const record: ApiKeyRecord = {
+      id: 'key_legacy',
+      tenantId: ' tenant_a',
+      name: 'legacy non-canonical tenant',
+      environment: 'live',
+      prefix: generated.prefix,
+      hash: hashed.hash,
+      pepperVersion: hashed.pepperVersion,
+      scopes: ['reports:read'],
+      lastUsedAt: null,
+      expiresAt: null,
+      revokedAt: null,
+      rotatedAt: null,
+      replacedByKeyId: null,
+      createdBy: null,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    const onEvent = jest.fn();
+    const storage = {
+      insert: jest.fn(),
+      findById: jest.fn(),
+      findByPrefix: jest.fn().mockResolvedValue(record),
+      listByTenant: jest.fn(),
+      markRevoked: jest.fn(),
+      touchLastUsed: jest.fn(),
+      rotate: jest.fn(),
+    } as ApiKeyStorage;
+    const { service } = svc({ storage, hasher, onEvent });
+
+    await expect(service.verify(generated.raw)).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Invalid,
+    });
+    expect(storage.touchLastUsed).not.toHaveBeenCalled();
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'api_key.auth_failed',
+        code: ApiKeyErrorCode.Invalid,
+        prefix: generated.prefix,
+      }),
+    );
+    expect(onEvent.mock.calls[0][0]).not.toHaveProperty('tenantId');
   });
 
   it('throws api_key_invalid for wrong secret', async () => {
@@ -1381,5 +1703,61 @@ describe('ApiKeysService.list and revoke', () => {
 
     const listed = await service.list('t1');
     expect(listed.map((record) => record.name)).toEqual(['b']);
+  });
+
+  it('rejects invalid list tenant IDs before storage access', async () => {
+    const { service, storage } = svc();
+    const listByTenant = jest.spyOn(storage, 'listByTenant');
+
+    await expect(service.list(' tenant_a')).rejects.toMatchObject({
+      code: ApiKeyOperationErrorCode.InvalidInput,
+    });
+    expect(listByTenant).not.toHaveBeenCalled();
+  });
+
+  it('tenant-bound revoke hides cross-tenant records and emits only the successful event', async () => {
+    const events: ApiKeyEvent[] = [];
+    const { service, storage } = svc({
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    const created = await service.create({
+      tenantId: 'tenant_a',
+      name: 'tenant A key',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+
+    await expect(
+      service.revokeForTenant('tenant_b', created.id),
+    ).rejects.toMatchObject({ code: ApiKeyOperationErrorCode.NotFound });
+    await expect(storage.findById(created.id)).resolves.toMatchObject({ revokedAt: null });
+
+    await service.revokeForTenant('tenant_a', created.id);
+    await expect(storage.findById(created.id)).resolves.toMatchObject({
+      revokedAt: new Date('2026-01-01T00:00:00Z'),
+    });
+    expect(events.filter((event) => event.type === 'api_key.revoked')).toEqual([
+      expect.objectContaining({ tenantId: 'tenant_a', keyId: created.id }),
+    ]);
+  });
+
+  it('tenant-bound revoke fails fast for a custom storage without the atomic capability', async () => {
+    const storage = {
+      insert: jest.fn(),
+      findById: jest.fn(),
+      findByPrefix: jest.fn(),
+      listByTenant: jest.fn(),
+      markRevoked: jest.fn(),
+      touchLastUsed: jest.fn(),
+      rotate: jest.fn(),
+    } as ApiKeyStorage;
+    const { service } = svc({ storage });
+
+    await expect(service.revokeForTenant('tenant_a', 'key_1')).rejects.toThrow(
+      'ApiKeyStorage.revokeForTenant() is required for tenant-bound revocation',
+    );
+    expect(storage.findById).not.toHaveBeenCalled();
+    expect(storage.markRevoked).not.toHaveBeenCalled();
   });
 });

@@ -4,6 +4,9 @@ import type {
   ListApiKeysOptions,
   RotateApiKeyStorageInput,
   RotateApiKeyStorageResult,
+  TenantBoundRevokeApiKeyStorageInput,
+  TenantBoundRevokeApiKeyStorageResult,
+  TenantBoundRotateApiKeyStorageInput,
 } from './api-key-storage.interface';
 
 interface PrismaApiKeyDelegate {
@@ -70,11 +73,38 @@ export class PrismaApiKeyStorage implements ApiKeyStorage {
     await this.prisma.apiKey.update({ where: { id }, data: { revokedAt: at } });
   }
 
+  async revokeForTenant(
+    input: TenantBoundRevokeApiKeyStorageInput,
+  ): Promise<TenantBoundRevokeApiKeyStorageResult> {
+    const result = await this.prisma.apiKey.updateMany({
+      where: { id: input.keyId, tenantId: input.expectedTenantId },
+      data: { revokedAt: input.revokedAt },
+    });
+    return result.count === 1 ? 'revoked' : 'not_found';
+  }
+
   async touchLastUsed(id: string, at: Date): Promise<void> {
     await this.prisma.apiKey.update({ where: { id }, data: { lastUsedAt: at } });
   }
 
   async rotate(input: RotateApiKeyStorageInput): Promise<RotateApiKeyStorageResult> {
+    return this.rotateMatchingTenant(input);
+  }
+
+  async rotateForTenant(
+    input: TenantBoundRotateApiKeyStorageInput,
+  ): Promise<RotateApiKeyStorageResult> {
+    return this.rotateMatchingTenant(input, input.expectedTenantId);
+  }
+
+  private async rotateMatchingTenant(
+    input: RotateApiKeyStorageInput,
+    expectedTenantId?: string,
+  ): Promise<RotateApiKeyStorageResult> {
+    if (expectedTenantId !== undefined && input.newRecord.tenantId !== expectedTenantId) {
+      return 'not_rotatable';
+    }
+
     if (typeof this.prisma.$transaction !== 'function') {
       throw new Error(
         'PrismaApiKeyStorage.rotate() requires interactive transaction support',
@@ -85,6 +115,7 @@ export class PrismaApiKeyStorage implements ApiKeyStorage {
       const claimed = await transaction.apiKey.updateMany({
         where: {
           id: input.oldKeyId,
+          ...(expectedTenantId !== undefined ? { tenantId: expectedTenantId } : {}),
           revokedAt: null,
           rotatedAt: null,
           replacedByKeyId: null,

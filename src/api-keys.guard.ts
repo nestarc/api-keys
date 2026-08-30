@@ -11,15 +11,12 @@ import {
   RequiredScope,
   SCOPE_METADATA,
 } from './decorators/require-scope.decorator';
-import { ApiKeyError, ApiKeyErrorCode } from './errors';
 import {
   API_KEY_CLIENT_IP_RESOLVER,
   ApiKeyClientIpResolver,
   defaultApiKeyClientIpResolver,
-  isIpAllowed,
 } from './ip-allowlist';
 import { copyApiKeyContext } from './payload-copy';
-import { scopeSatisfies } from './scope-matcher';
 import type { Environment } from './types';
 
 export { API_KEY_CONTEXT_PROPERTY };
@@ -42,41 +39,26 @@ export class ApiKeysGuard implements CanActivate {
     const header = request.headers as Record<string, string> | undefined;
     const authorization = header?.authorization;
 
-    if (!authorization) {
-      throw new ApiKeyError(ApiKeyErrorCode.Missing);
-    }
-
-    const rawKey = authorization.startsWith('Bearer ')
-      ? authorization.slice('Bearer '.length)
-      : authorization;
-    const apiKeyContext = await this.service.verify(rawKey);
-
     const requiredEnvironment = this.reflector.getAllAndOverride<Environment | undefined>(
       ENVIRONMENT_METADATA,
       [context.getHandler(), context.getClass()],
     );
-    if (requiredEnvironment && apiKeyContext.environment !== requiredEnvironment) {
-      throw new ApiKeyError(ApiKeyErrorCode.EnvironmentMismatch);
-    }
-
-    const allowedIpCidrs = apiKeyContext.allowedIpCidrs ?? [];
-    if (allowedIpCidrs.length > 0) {
-      const clientIp = await (this.clientIpResolver ?? defaultApiKeyClientIpResolver)(request);
-      if (!isIpAllowed(clientIp, allowedIpCidrs)) {
-        throw new ApiKeyError(ApiKeyErrorCode.IpNotAllowed);
-      }
-    }
-
     const requiredScope = this.reflector.getAllAndOverride<RequiredScope | undefined>(
       SCOPE_METADATA,
       [context.getHandler(), context.getClass()],
     );
-    if (
-      requiredScope &&
-      !scopeSatisfies(apiKeyContext.scopes, requiredScope.resource, requiredScope.level)
-    ) {
-      throw new ApiKeyError(ApiKeyErrorCode.ScopeInsufficient);
-    }
+    const rawKey = authorization
+      ? authorization.startsWith('Bearer ')
+        ? authorization.slice('Bearer '.length)
+        : authorization
+      : undefined;
+    const apiKeyContext = await this.service.authorizeRequest({
+      rawKey,
+      requiredEnvironment,
+      requiredScope,
+      request,
+      clientIpResolver: this.clientIpResolver ?? defaultApiKeyClientIpResolver,
+    });
 
     request[API_KEY_CONTEXT_PROPERTY] = copyApiKeyContext(apiKeyContext);
     await this.contextWriter?.(copyApiKeyContext(apiKeyContext), request);

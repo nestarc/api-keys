@@ -3,6 +3,9 @@ export * from './errors';
 export {
   API_KEY_NAMESPACE_MAX_LENGTH,
   API_KEY_SCOPE_RESOURCE_MAX_LENGTH,
+  API_KEY_TENANT_ID_MAX_LENGTH,
+  isValidTenantId,
+  validateTenantId,
 } from './input-validation';
 export * from './scope-matcher';
 export * from './context';
@@ -22,6 +25,9 @@ export type {
   ListApiKeysOptions,
   RotateApiKeyStorageInput,
   RotateApiKeyStorageResult,
+  TenantBoundRevokeApiKeyStorageInput,
+  TenantBoundRevokeApiKeyStorageResult,
+  TenantBoundRotateApiKeyStorageInput,
 } from './storage/api-key-storage.interface';
 export { InMemoryApiKeyStorage } from './storage/in-memory-storage';
 export { PrismaApiKeyStorage } from './storage/prisma-storage';

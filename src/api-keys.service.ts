@@ -7,17 +7,30 @@ import {
   ApiKeyOperationErrorCode,
 } from './errors';
 import { generateKey, parseKey } from './key-format';
-import { normalizeAllowedIpCidrs } from './ip-allowlist';
-import { validateEnvironment, validateNamespace } from './input-validation';
 import {
+  defaultApiKeyClientIpResolver,
+  isIpAllowed,
+  normalizeAllowedIpCidrs,
+} from './ip-allowlist';
+import {
+  isValidTenantId,
+  validateEnvironment,
+  validateNamespace,
+  validateTenantId,
+} from './input-validation';
+import {
+  copyApiKeyAuthorizationMetric,
   copyApiKeyContext,
   copyApiKeyEvent,
   copyApiKeyVerificationMetric,
 } from './payload-copy';
-import { flattenScopes } from './scope-matcher';
+import { flattenScopes, scopeSatisfies } from './scope-matcher';
 import type { ApiKeyStorage } from './storage/api-key-storage.interface';
 import type {
   ApiKeyContext,
+  ApiKeyAuthorizationMetric,
+  ApiKeyAuthorizationMetricSink,
+  ApiKeyAuthorizationOutcome,
   ApiKeyEvent,
   ApiKeyEventSink,
   ApiKeyMetricSink,
@@ -25,6 +38,7 @@ import type {
   ApiKeyRecord,
   ApiKeyVerificationMetric,
   ApiKeyVerificationOutcome,
+  ApiKeyRequestAuthorizationInput,
   CreateApiKeyInput,
   CreateApiKeyResult,
   RotateApiKeyInput,
@@ -44,6 +58,8 @@ export interface ApiKeysServiceDeps {
   onEventError?: (error: unknown, event: ApiKeyEvent) => void;
   onMetric?: ApiKeyMetricSink;
   onMetricError?: (error: unknown, metric: ApiKeyVerificationMetric) => void;
+  onAuthorizationMetric?: ApiKeyAuthorizationMetricSink;
+  onAuthorizationMetricError?: (error: unknown, metric: ApiKeyAuthorizationMetric) => void;
   emitUsageEvents?: boolean;
   ttlPolicy?: ApiKeyTtlPolicy;
   monotonicClock?: () => number;
@@ -63,6 +79,11 @@ export class ApiKeysService {
   private readonly onEventError?: (error: unknown, event: ApiKeyEvent) => void;
   private readonly onMetric?: ApiKeyMetricSink;
   private readonly onMetricError?: (error: unknown, metric: ApiKeyVerificationMetric) => void;
+  private readonly onAuthorizationMetric?: ApiKeyAuthorizationMetricSink;
+  private readonly onAuthorizationMetricError?: (
+    error: unknown,
+    metric: ApiKeyAuthorizationMetric,
+  ) => void;
   private readonly emitUsageEvents: boolean;
   private readonly ttlPolicy?: ApiKeyTtlPolicy;
   private readonly monotonicClock: () => number;
@@ -79,6 +100,8 @@ export class ApiKeysService {
     this.onEventError = deps.onEventError;
     this.onMetric = deps.onMetric;
     this.onMetricError = deps.onMetricError;
+    this.onAuthorizationMetric = deps.onAuthorizationMetric;
+    this.onAuthorizationMetricError = deps.onAuthorizationMetricError;
     this.emitUsageEvents = deps.emitUsageEvents ?? false;
     this.ttlPolicy = deps.ttlPolicy
       ? {
@@ -105,6 +128,7 @@ export class ApiKeysService {
   }
 
   async create(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
+    const tenantId = validateTenantId(input.tenantId);
     const environment = validateEnvironment(input.environment ?? 'live');
     const scopes = flattenScopes(input.scopes);
     const now = this.currentTime();
@@ -117,7 +141,7 @@ export class ApiKeysService {
 
       const record: ApiKeyRecord = {
         id: this.idFactory(),
-        tenantId: input.tenantId,
+        tenantId,
         name: input.name,
         environment,
         prefix: generatedKey.prefix,
@@ -165,6 +189,76 @@ export class ApiKeysService {
   }
 
   async verify(rawKey: string): Promise<ApiKeyContext> {
+    const verified = await this.verifyCredential(rawKey);
+    this.recordSuccessfulUse(verified.record);
+    return copyApiKeyContext(verified.context);
+  }
+
+  async authorizeRequest(input: ApiKeyRequestAuthorizationInput): Promise<ApiKeyContext> {
+    const startedAt = this.onAuthorizationMetric ? this.monotonicClock() : 0;
+    let metricEnvironment: ApiKeyContext['environment'] | undefined;
+
+    try {
+      if (input.rawKey === undefined || input.rawKey === null) {
+        throw new ApiKeyError(ApiKeyErrorCode.Missing);
+      }
+
+      const verified = await this.verifyCredential(input.rawKey);
+      const apiKeyContext = verified.context;
+      metricEnvironment = apiKeyContext.environment;
+
+      if (input.requiredEnvironment && apiKeyContext.environment !== input.requiredEnvironment) {
+        throw new ApiKeyError(ApiKeyErrorCode.EnvironmentMismatch);
+      }
+
+      const allowedIpCidrs = apiKeyContext.allowedIpCidrs ?? [];
+      if (allowedIpCidrs.length > 0) {
+        let clientIp = input.clientIp;
+        if (clientIp === undefined) {
+          const resolver =
+            input.clientIpResolver ??
+            (input.request === undefined ? undefined : defaultApiKeyClientIpResolver);
+          clientIp = await resolver?.(input.request);
+        }
+        if (!isIpAllowed(clientIp, allowedIpCidrs)) {
+          throw new ApiKeyError(ApiKeyErrorCode.IpNotAllowed);
+        }
+      }
+
+      if (
+        input.requiredScope &&
+        !scopeSatisfies(
+          apiKeyContext.scopes,
+          input.requiredScope.resource,
+          input.requiredScope.level,
+        )
+      ) {
+        throw new ApiKeyError(ApiKeyErrorCode.ScopeInsufficient);
+      }
+
+      this.recordSuccessfulUse(verified.record);
+      this.recordAuthorizationMetric('success', startedAt, metricEnvironment);
+      return copyApiKeyContext(apiKeyContext);
+    } catch (error) {
+      if (error instanceof ApiKeyError) {
+        this.emitEvent({
+          type: 'api_key.authorization_denied',
+          at: this.clock(),
+          code: error.code,
+        });
+      }
+      this.recordAuthorizationMetric(
+        authorizationOutcomeFromError(error),
+        startedAt,
+        metricEnvironment,
+      );
+      throw error;
+    }
+  }
+
+  private async verifyCredential(
+    rawKey: string,
+  ): Promise<{ context: ApiKeyContext; record: ApiKeyRecord }> {
     const startedAt = this.onMetric ? this.monotonicClock() : 0;
     let metricEnvironment: ApiKeyContext['environment'] | undefined;
 
@@ -205,6 +299,11 @@ export class ApiKeysService {
         throw new ApiKeyError(ApiKeyErrorCode.Invalid);
       }
 
+      if (!isValidTenantId(record.tenantId)) {
+        this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid);
+        throw new ApiKeyError(ApiKeyErrorCode.Invalid);
+      }
+
       if (record.revokedAt !== null) {
         this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Revoked, record);
         throw new ApiKeyError(ApiKeyErrorCode.Revoked);
@@ -227,22 +326,6 @@ export class ApiKeysService {
         }
       }
 
-      // Usage tracking is intentionally best-effort. A concurrent revoke may still win
-      // after this verification and leave a later lastUsedAt update behind, which is
-      // acceptable because it is telemetry and must not block successful auth.
-      void this.scheduleTouch(record);
-      if (this.emitUsageEvents) {
-        this.emitEvent({
-          type: 'api_key.used',
-          at: this.clock(),
-          keyId: record.id,
-          tenantId: record.tenantId,
-          prefix: record.prefix,
-          environment: record.environment,
-          scopes: record.scopes,
-        });
-      }
-
       const apiKeyContext: ApiKeyContext = {
         keyId: record.id,
         tenantId: record.tenantId,
@@ -252,7 +335,7 @@ export class ApiKeysService {
         allowedIpCidrs: [...(record.allowedIpCidrs ?? [])],
       };
       this.recordVerificationMetric('success', startedAt, metricEnvironment);
-      return copyApiKeyContext(apiKeyContext);
+      return { context: copyApiKeyContext(apiKeyContext), record };
     } catch (error) {
       this.recordVerificationMetric(
         verificationOutcomeFromError(error),
@@ -265,6 +348,9 @@ export class ApiKeysService {
 
   async revoke(id: string): Promise<void> {
     const record = await this.storage.findById(id);
+    if (record) {
+      validateTenantId(record.tenantId);
+    }
     await this.storage.markRevoked(id, this.currentTime());
     if (record) {
       this.emitEvent({
@@ -278,9 +364,71 @@ export class ApiKeysService {
     }
   }
 
+  async revokeForTenant(tenantId: string, id: string): Promise<void> {
+    const expectedTenantId = validateTenantId(tenantId);
+    const revokeForTenant = this.storage.revokeForTenant?.bind(this.storage);
+    if (!revokeForTenant) {
+      throw new Error(
+        'ApiKeyStorage.revokeForTenant() is required for tenant-bound revocation',
+      );
+    }
+
+    const record = await this.storage.findById(id);
+    if (!record || !isValidTenantId(record.tenantId) || record.tenantId !== expectedTenantId) {
+      throw new ApiKeyOperationError(ApiKeyOperationErrorCode.NotFound);
+    }
+
+    const revokedAt = this.currentTime();
+    const result = await revokeForTenant({
+      keyId: id,
+      expectedTenantId,
+      revokedAt,
+    });
+    if (result === 'not_found') {
+      throw new ApiKeyOperationError(ApiKeyOperationErrorCode.NotFound);
+    }
+    if (result !== 'revoked') {
+      throw new Error(
+        'ApiKeyStorage.revokeForTenant() must atomically return "revoked" or "not_found"',
+      );
+    }
+
+    this.emitEvent({
+      type: 'api_key.revoked',
+      at: revokedAt,
+      keyId: record.id,
+      tenantId: record.tenantId,
+      prefix: record.prefix,
+      environment: record.environment,
+    });
+  }
+
   async rotate(
     id: string,
     input: RotateApiKeyInput = {},
+  ): Promise<RotateApiKeyResult> {
+    return this.rotateInternal(id, input);
+  }
+
+  async rotateForTenant(
+    tenantId: string,
+    id: string,
+    input: RotateApiKeyInput = {},
+  ): Promise<RotateApiKeyResult> {
+    const expectedTenantId = validateTenantId(tenantId);
+    if (!this.storage.rotateForTenant) {
+      throw new Error(
+        'ApiKeyStorage.rotateForTenant() is required for tenant-bound rotation',
+      );
+    }
+
+    return this.rotateInternal(id, input, expectedTenantId);
+  }
+
+  private async rotateInternal(
+    id: string,
+    input: RotateApiKeyInput,
+    expectedTenantId?: string,
   ): Promise<RotateApiKeyResult> {
     const gracePeriodMs = validateDuration(input.gracePeriodMs ?? 0, 'gracePeriodMs');
     if (input.expiresAt !== undefined && input.expiresAt !== null) {
@@ -290,6 +438,12 @@ export class ApiKeysService {
     const oldRecord = await this.storage.findById(id);
     if (!oldRecord) {
       throw new ApiKeyOperationError(ApiKeyOperationErrorCode.NotFound);
+    }
+    if (expectedTenantId !== undefined && oldRecord.tenantId !== expectedTenantId) {
+      throw new ApiKeyOperationError(ApiKeyOperationErrorCode.NotFound);
+    }
+    if (!isValidTenantId(oldRecord.tenantId)) {
+      throw new ApiKeyOperationError(ApiKeyOperationErrorCode.NotRotatable);
     }
 
     const now = this.currentTime();
@@ -353,12 +507,19 @@ export class ApiKeysService {
       };
 
       try {
-        const rotationResult = await this.storage.rotate({
+        const rotationInput = {
           oldKeyId: oldRecord.id,
           newRecord,
           oldExpiresAt,
           rotatedAt: now,
-        });
+        };
+        const rotationResult =
+          expectedTenantId === undefined
+            ? await this.storage.rotate(rotationInput)
+            : await this.storage.rotateForTenant!({
+                ...rotationInput,
+                expectedTenantId,
+              });
         if (rotationResult === 'not_rotatable') {
           throw new ApiKeyOperationError(ApiKeyOperationErrorCode.NotRotatable);
         }
@@ -404,7 +565,17 @@ export class ApiKeysService {
     tenantId: string,
     opts: { includeRevoked?: boolean } = {},
   ): Promise<ApiKeyRecord[]> {
-    return this.storage.listByTenant(tenantId, opts);
+    const canonicalTenantId = validateTenantId(tenantId);
+    const records = await this.storage.listByTenant(canonicalTenantId, opts);
+    for (const record of records) {
+      if (!isValidTenantId(record.tenantId) || record.tenantId !== canonicalTenantId) {
+        throw new ApiKeyOperationError(
+          ApiKeyOperationErrorCode.InvalidInput,
+          'storage returned a record outside the exact tenant boundary',
+        );
+      }
+    }
+    return records;
   }
 
   private async scheduleTouch(record: ApiKeyRecord): Promise<void> {
@@ -417,6 +588,24 @@ export class ApiKeysService {
       await this.storage.touchLastUsed(record.id, now);
     } catch {
       // Best-effort usage tracking should not break authentication.
+    }
+  }
+
+  private recordSuccessfulUse(record: ApiKeyRecord): void {
+    // Usage tracking is intentionally best-effort. A concurrent revoke may still win
+    // after an accepted use and leave a later lastUsedAt update behind, which is
+    // acceptable because telemetry must not block authentication or authorization.
+    void this.scheduleTouch(record);
+    if (this.emitUsageEvents) {
+      this.emitEvent({
+        type: 'api_key.used',
+        at: this.clock(),
+        keyId: record.id,
+        tenantId: record.tenantId,
+        prefix: record.prefix,
+        environment: record.environment,
+        scopes: record.scopes,
+      });
     }
   }
 
@@ -550,6 +739,48 @@ export class ApiKeysService {
       // Metric failure reporting must not break API key operations.
     }
   }
+
+  private recordAuthorizationMetric(
+    outcome: ApiKeyAuthorizationOutcome,
+    startedAt: number,
+    environment?: ApiKeyContext['environment'],
+  ): void {
+    if (!this.onAuthorizationMetric) {
+      return;
+    }
+
+    const metric: ApiKeyAuthorizationMetric = {
+      type: 'api_key.authorization',
+      outcome,
+      durationMs: Math.max(0, this.monotonicClock() - startedAt),
+      ...(environment ? { environment } : {}),
+    };
+
+    try {
+      const result = this.onAuthorizationMetric(copyApiKeyAuthorizationMetric(metric));
+      if (result && typeof result === 'object' && 'then' in result) {
+        void result.catch((error: unknown) =>
+          this.handleAuthorizationMetricError(error, metric),
+        );
+      }
+    } catch (error) {
+      this.handleAuthorizationMetricError(error, metric);
+    }
+  }
+
+  private handleAuthorizationMetricError(
+    error: unknown,
+    metric: ApiKeyAuthorizationMetric,
+  ): void {
+    try {
+      this.onAuthorizationMetricError?.(
+        error,
+        copyApiKeyAuthorizationMetric(metric),
+      );
+    } catch {
+      // Metric failure reporting must not break request authorization.
+    }
+  }
 }
 
 function verificationOutcomeFromError(error: unknown): ApiKeyVerificationOutcome {
@@ -568,6 +799,28 @@ function verificationOutcomeFromError(error: unknown): ApiKeyVerificationOutcome
       return 'expired';
     default:
       return 'error';
+  }
+}
+
+function authorizationOutcomeFromError(error: unknown): ApiKeyAuthorizationOutcome {
+  if (!(error instanceof ApiKeyError)) {
+    return 'error';
+  }
+
+  switch (error.code) {
+    case ApiKeyErrorCode.Missing:
+      return 'missing';
+    case ApiKeyErrorCode.Malformed:
+    case ApiKeyErrorCode.Invalid:
+    case ApiKeyErrorCode.Revoked:
+    case ApiKeyErrorCode.Expired:
+      return 'credential_rejected';
+    case ApiKeyErrorCode.EnvironmentMismatch:
+      return 'environment_denied';
+    case ApiKeyErrorCode.IpNotAllowed:
+      return 'ip_denied';
+    case ApiKeyErrorCode.ScopeInsufficient:
+      return 'scope_denied';
   }
 }
 

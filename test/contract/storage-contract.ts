@@ -87,6 +87,34 @@ export function storageContract(name: string, factory: () => ApiKeyStorage): voi
       expect(found?.revokedAt?.toISOString()).toBe(revokedAt.toISOString());
     });
 
+    it('tenant-bound revoke mutates only the exact tenant record', async () => {
+      const record = fixture({ tenantId: 'tenant_a' });
+      const revokedAt = new Date('2026-02-01T00:00:00Z');
+      await storage.insert(record);
+
+      if (!storage.revokeForTenant) {
+        throw new Error('built-in storage must implement revokeForTenant');
+      }
+
+      await expect(
+        storage.revokeForTenant({
+          keyId: record.id,
+          expectedTenantId: 'tenant_b',
+          revokedAt,
+        }),
+      ).resolves.toBe('not_found');
+      await expect(storage.findById(record.id)).resolves.toMatchObject({ revokedAt: null });
+
+      await expect(
+        storage.revokeForTenant({
+          keyId: record.id,
+          expectedTenantId: 'tenant_a',
+          revokedAt,
+        }),
+      ).resolves.toBe('revoked');
+      await expect(storage.findById(record.id)).resolves.toMatchObject({ revokedAt });
+    });
+
     it('touchLastUsed updates lastUsedAt', async () => {
       const record = fixture();
       const lastUsedAt = new Date('2026-02-02T00:00:00Z');
@@ -136,6 +164,36 @@ export function storageContract(name: string, factory: () => ApiKeyStorage): voi
         rotatedAt: null,
         replacedByKeyId: null,
       });
+    });
+
+    it('tenant-bound rotation atomically rejects a different tenant', async () => {
+      const oldRecord = fixture({
+        id: 'old_key',
+        tenantId: 'tenant_a',
+        prefix: 'oldprefix001',
+      });
+      const newRecord = fixture({
+        id: 'new_key',
+        tenantId: 'tenant_a',
+        prefix: 'newprefix001',
+      });
+      await storage.insert(oldRecord);
+
+      if (!storage.rotateForTenant) {
+        throw new Error('built-in storage must implement rotateForTenant');
+      }
+
+      await expect(
+        storage.rotateForTenant({
+          oldKeyId: oldRecord.id,
+          expectedTenantId: 'tenant_b',
+          newRecord,
+          oldExpiresAt: new Date('2026-02-08T00:00:00Z'),
+          rotatedAt: new Date('2026-02-01T00:00:00Z'),
+        }),
+      ).resolves.toBe('not_rotatable');
+      await expect(storage.findById(oldRecord.id)).resolves.toEqual(oldRecord);
+      await expect(storage.findById(newRecord.id)).resolves.toBeNull();
     });
 
     it('allows exactly one concurrent rotation and stores exactly one linked replacement', async () => {

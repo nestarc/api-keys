@@ -11,6 +11,18 @@ export interface RotateApiKeyStorageInput {
   rotatedAt: Date;
 }
 
+export interface TenantBoundRevokeApiKeyStorageInput {
+  keyId: string;
+  expectedTenantId: string;
+  revokedAt: Date;
+}
+
+export type TenantBoundRevokeApiKeyStorageResult = 'revoked' | 'not_found';
+
+export interface TenantBoundRotateApiKeyStorageInput extends RotateApiKeyStorageInput {
+  expectedTenantId: string;
+}
+
 export type RotateApiKeyStorageResult = 'rotated' | 'not_rotatable';
 
 export interface ApiKeyStorage {
@@ -19,6 +31,12 @@ export interface ApiKeyStorage {
   findByPrefix(prefix: string): Promise<ApiKeyRecord | null>;
   listByTenant(tenantId: string, opts?: ListApiKeysOptions): Promise<ApiKeyRecord[]>;
   markRevoked(id: string, at: Date): Promise<void>;
+  revokeForTenant?(
+    input: TenantBoundRevokeApiKeyStorageInput,
+  ): Promise<TenantBoundRevokeApiKeyStorageResult>;
   touchLastUsed(id: string, at: Date): Promise<void>;
   rotate(input: RotateApiKeyStorageInput): Promise<RotateApiKeyStorageResult>;
+  rotateForTenant?(
+    input: TenantBoundRotateApiKeyStorageInput,
+  ): Promise<RotateApiKeyStorageResult>;
 }

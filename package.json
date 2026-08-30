@@ -28,6 +28,7 @@
     "test:consumer:strict:modern": "node scripts/test-strict-consumer.js --nest 11.2.1 --prisma 7.10.0",
     "test:consumer:http:nest10": "node scripts/test-http-consumer.js --nest 10.4.20",
     "test:consumer:http:nest11": "node scripts/test-http-consumer.js --nest 11.2.1",
+    "test:consumer:rbac": "node scripts/test-rbac-consumer.js",
     "bench": "ts-node bench/api-keys.bench.ts",
     "bench:smoke": "npm run bench -- --iterations 250 --warmup 50 --timing-threshold-ms 0.5",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",

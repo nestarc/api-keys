@@ -131,6 +131,47 @@ Module({
     if (context.tenantId !== 'tenant_strict') {
       throw new Error('Nest runtime smoke test lost the API key tenant');
     }
+    const ipRestricted = await apiKeys.create({
+      tenantId: 'tenant_strict',
+      name: 'Restricted direct consumer',
+      scopes: [{ resource: 'consumer', level: 'read' }],
+      allowedIpCidrs: ['203.0.113.0/24'],
+    });
+    await apiKeys.verify(ipRestricted.key);
+    let missingIpCode;
+    try {
+      await apiKeys.authorizeRequest({ rawKey: ipRestricted.key });
+    } catch (error) {
+      missingIpCode = error?.code;
+    }
+    if (missingIpCode !== 'api_key_ip_not_allowed') {
+      throw new Error('Request-aware verification did not fail closed without a client IP');
+    }
+    const authorizedContext = await apiKeys.authorizeRequest({
+      rawKey: ipRestricted.key,
+      clientIp: '203.0.113.42',
+      requiredEnvironment: 'live',
+      requiredScope: { resource: 'consumer', level: 'read' },
+    });
+    if (authorizedContext.keyId !== ipRestricted.id) {
+      throw new Error('Request-aware verification lost the API key identity');
+    }
+    let crossTenantCode;
+    try {
+      await apiKeys.revokeForTenant('tenant_attacker', created.id);
+    } catch (error) {
+      crossTenantCode = error?.code;
+    }
+    if (crossTenantCode !== 'api_key_record_not_found') {
+      throw new Error('Tenant-bound revoke did not hide the cross-tenant record');
+    }
+    await apiKeys.verify(created.key);
+    const replacement = await apiKeys.rotateForTenant('tenant_strict', created.id);
+    const replacementContext = await apiKeys.verify(replacement.key);
+    if (replacementContext.tenantId !== 'tenant_strict') {
+      throw new Error('Tenant-bound rotation lost the exact tenant');
+    }
+    await apiKeys.revokeForTenant('tenant_strict', replacement.id);
   } finally {
     await app.close();
   }
@@ -151,7 +192,9 @@ function writeTypeScriptConsumer(consumerDir) {
   InMemoryApiKeyStorage,
   PrismaApiKeyStorage,
   createTestKey,
+  type ApiKeyAuthorizationMetric,
   type ApiKeyContext,
+  type ApiKeyRequestAuthorizationInput,
   type PrismaLike,
 } from '@nestarc/api-keys';
 import type { DynamicModule } from '@nestjs/common';
@@ -169,9 +212,29 @@ async function verifyPublicTypes(service: ApiKeysService): Promise<ApiKeyContext
   return fixture.context;
 }
 
+async function verifyTenantBoundManagementTypes(service: ApiKeysService): Promise<void> {
+  await service.revokeForTenant('tenant_types', 'key_types');
+  await service.rotateForTenant('tenant_types', 'key_types', { gracePeriodMs: 1_000 });
+}
+
+async function verifyRequestAuthorizationTypes(
+  service: ApiKeysService,
+  input: ApiKeyRequestAuthorizationInput,
+): Promise<ApiKeyContext> {
+  const metric: ApiKeyAuthorizationMetric = {
+    type: 'api_key.authorization',
+    outcome: 'success',
+    durationMs: 1,
+  };
+  void metric;
+  return service.authorizeRequest(input);
+}
+
 void apiKeysModule;
 void prismaStorage;
 void verifyPublicTypes;
+void verifyTenantBoundManagementTypes;
+void verifyRequestAuthorizationTypes;
 `,
   );
   fs.writeFileSync(

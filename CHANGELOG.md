@@ -10,6 +10,15 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ## [Unreleased]
 
+### Added
+
+- Add request-aware `authorizeRequest()` and make `ApiKeysGuard` use it for environment, IP, and
+  scope policy. Restricted credentials fail closed when no client IP is available, while the
+  existing `verify()` method remains an explicitly credential-only compatibility primitive.
+- Separate credential verification from request authorization telemetry. Guard denials no longer
+  update `lastUsedAt` or emit `api_key.used`; they emit a low-cardinality
+  `api_key.authorization_denied` event and optional `api_key.authorization` metric instead.
+
 ### Fixed
 
 - Authenticate a known prefix's secret before revealing revoked or expired lifecycle state;
@@ -34,6 +43,12 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
   identity data, or failure-reporting payloads. `ApiKeysGuard` now gives `contextWriter` an isolated
   copy and restores the verified `request.apiKey` identity after the writer completes, preventing
   cross-tenant, privileged-scope, and IP-policy replacement from reaching downstream RBAC/RLS code.
+- Validate tenant IDs as exact 1–255 character strings without leading or trailing whitespace,
+  reject invalid create/list input before storage access, and fail closed instead of trimming or
+  coercing non-canonical persisted identities into events or `request.apiKey`.
+- Add tenant-bound `revokeForTenant()` and `rotateForTenant()` service methods. The built-in
+  adapters bind the expected tenant to the revoke update and atomic rotation CAS; missing and
+  cross-tenant IDs share `api_key_record_not_found` and create no replacement credential.
 
 ### Changed
 
@@ -51,6 +66,11 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
   the documented 1–128 character grammar and use the reserved `:` only as the resource/level
   separator. Existing stored keys keep their scope strings, but callers issuing new keys with
   whitespace or other punctuation must migrate those resource names before upgrading.
+- **Breaking in the planned pre-1.0 `0.4.0` release:** tenant IDs are opaque exact strings limited
+  to 1–255 UTF-16 code units with no leading or trailing whitespace. Existing non-canonical records must
+  be migrated with their tenancy/RBAC references or have their credentials reissued; values are
+  never normalized at runtime. Custom adapters must implement the optional tenant-bound revoke and
+  rotate capabilities before exposing the additive safe management methods.
 
 ## [0.3.2] - 2026-08-30
 
