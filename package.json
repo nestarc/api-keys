@@ -46,7 +46,7 @@
   },
   "devDependencies": {
     "@nestarc/rbac": "^0.2.0",
-    "@nestjs/common": "^10.3.0",
+    "@nestjs/common": "^11.2.3",
     "@nestjs/core": "^10.3.0",
     "@nestjs/testing": "^10.3.0",
     "@prisma/client": "5.22.0",
