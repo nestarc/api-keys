@@ -29,6 +29,11 @@ Secure, tenant-scoped API keys for NestJS + Prisma. SHA-256 hashed, Stripe-style
 npm install @nestarc/api-keys
 ```
 
+Node.js 22.13.0 or newer within the Node 22 line, or Node 24, is required. Node 22.13.0 is the
+tested minimum and Node 24 is the current source and release runtime. Node 20 is not supported
+starting with the planned `0.4.0` release; upgrade the application runtime before upgrading this
+package. Newer unlisted Node majors are not supported until they are added to the tested matrix.
+
 NestJS 10 and 11 are supported. `@prisma/client` is an optional peer dependency: the Prisma
 storage adapter is verified with Prisma 5.22.0, 6.19.3, and 7.10.0 against PostgreSQL and
 declares support for `^5.0.0 || ^6.0.0 || ^7.0.0`. Consumers that use the in-memory adapter or
@@ -529,12 +534,15 @@ request(app).get('/reports').set('Authorization', `Bearer ${fixture.key}`);
 - [`docs/spec-0.3.md`](docs/spec-0.3.md) v0.3 technical spec
 - [Tenant identity and management boundary ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-tenant-identity-contract-adr.md)
 - [Request authorization telemetry ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-request-authorization-telemetry-adr.md)
+- [Node.js support policy ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-node-support-policy-adr.md)
 - [`CHANGELOG.md`](CHANGELOG.md) Release history
 
 ## Contributing
 
-CI runs `lint`, `test`, `build`, and a bounded benchmark smoke check on Node 20 and 22 for every
-PR. It also runs the PostgreSQL storage contract against matching Prisma CLI/client versions
+CI runs `lint`, `test`, `build`, and a bounded benchmark smoke check on the exact Node 22.13.0
+minimum and Node 24 for every PR. The DB and packed-consumer jobs run on the minimum so support
+cannot drift below the public `engines.node` contract. CI also runs the PostgreSQL storage contract
+against matching Prisma CLI/client versions
 5.22.0, 6.19.3, and 7.10.0; the Prisma 7 lane uses matching `@prisma/adapter-pg`. Run that
 contract locally with `npm run test:e2e:prisma`; the runner uses `PRISMA_E2E_DATABASE_URL` when
 supplied, otherwise it starts a disposable PostgreSQL 16 Docker container.

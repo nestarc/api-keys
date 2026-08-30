@@ -9,6 +9,7 @@ const DEFAULT_NEST_VERSION = '11.2.3';
 const DEFAULT_PRISMA_VERSION = '7.10.0';
 const EXPECTED_NEST_PEER = '^10.0.0 || ^11.0.0';
 const EXPECTED_PRISMA_PEER = '^5.0.0 || ^6.0.0 || ^7.0.0';
+const EXPECTED_NODE_ENGINE = '^22.13.0 || ^24.0.0';
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -352,6 +353,9 @@ function main() {
       throw new Error(
         `Packed version ${packedArtifact.version} installed as ${packedPackage.version}`,
       );
+    }
+    if (packedPackage.engines?.node !== EXPECTED_NODE_ENGINE) {
+      throw new Error(`Packed engine metadata must be ${EXPECTED_NODE_ENGINE}`);
     }
 
     const consumerLock = JSON.parse(

@@ -56,6 +56,10 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ### Changed
 
+- **Breaking in the planned pre-1.0 `0.4.0` release:** support Node.js `^22.13.0 || ^24.0.0` and
+  move the source matrix to the exact Node 22.13.0 minimum plus Node 24. Node 20 users must upgrade
+  their application runtime before upgrading this package. Unlisted future Node majors, including
+  Node 26, remain outside the engine range until they are added to the tested matrix.
 - **Breaking in the planned pre-1.0 `0.4.0` release:** custom `ApiKeyStorage.rotate()`
   implementations must atomically return `'rotated'` or `'not_rotatable'`. Legacy `Promise<void>`
   adapters fail fast and must migrate; this change will not be published as a `0.3.x` patch.

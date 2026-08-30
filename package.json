@@ -6,7 +6,7 @@
   "author": "nestarc",
   "repository": "github:nestarc/api-keys",
   "engines": {
-    "node": ">=20"
+    "node": "^22.13.0 || ^24.0.0"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -55,7 +55,7 @@
     "@nestjs/testing": "~11.2.3",
     "@prisma/client": "5.22.0",
     "@types/jest": "^30.0.0",
-    "@types/node": "^20.11.0",
+    "@types/node": "^22.13.0",
     "@typescript-eslint/eslint-plugin": "^8.68.0",
     "@typescript-eslint/parser": "^8.68.0",
     "eslint": "^10.9.1",
