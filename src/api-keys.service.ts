@@ -166,16 +166,6 @@ export class ApiKeysService {
       }
       metricEnvironment = record.environment;
 
-      if (record.revokedAt !== null) {
-        this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Revoked, record);
-        throw new ApiKeyError(ApiKeyErrorCode.Revoked);
-      }
-
-      if (record.expiresAt !== null && record.expiresAt.getTime() <= this.clock().getTime()) {
-        this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Expired, record);
-        throw new ApiKeyError(ApiKeyErrorCode.Expired);
-      }
-
       let matches: boolean;
       try {
         matches = this.hasher.verify(parsedKey.secret, record.hash, record.pepperVersion);
@@ -187,6 +177,16 @@ export class ApiKeysService {
       if (!matches) {
         this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid, record);
         throw new ApiKeyError(ApiKeyErrorCode.Invalid);
+      }
+
+      if (record.revokedAt !== null) {
+        this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Revoked, record);
+        throw new ApiKeyError(ApiKeyErrorCode.Revoked);
+      }
+
+      if (record.expiresAt !== null && record.expiresAt.getTime() <= this.clock().getTime()) {
+        this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Expired, record);
+        throw new ApiKeyError(ApiKeyErrorCode.Expired);
       }
 
       // Usage tracking is intentionally best-effort. A concurrent revoke may still win

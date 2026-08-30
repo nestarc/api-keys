@@ -89,3 +89,26 @@ jobs:
       - name: Verify strict tarball consumer
         if: matrix.consumer != ''
         run: npm run ${{ matrix.consumer }}
+
+  http-consumer:
+    name: http consumer (Nest ${{ matrix.nest }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nest: '10.4.20'
+            script: 'test:consumer:http:nest10'
+          - nest: '11.2.1'
+            script: 'test:consumer:http:nest11'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run ${{ matrix.script }}

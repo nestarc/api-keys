@@ -6,13 +6,14 @@
  *   B) Sha256Hasher.hash() — hasher wrapper overhead
  *   C) Sha256Hasher.verify() — hash + timing-safe compare
  *   D) ApiKeysService.verify() — HAPPY path (parse + lookup + hash + compare + context)
- *   E) ApiKeysService.verify() — INVALID key (should be close to D; validates timing-safe claim)
- *   F) create() + verify() round-trip — key-issuance throughput
+ *   E) ApiKeysService.verify() — UNKNOWN prefix (dummy hash + compare)
+ *   F) ApiKeysService.verify() — KNOWN prefix with wrong secret (real hash + compare)
+ *   G) create() + verify() round-trip — key-issuance throughput
  *
- * Key measurement: |D_p50 − E_p50| should be small (target: < 50µs). If the invalid
- * path is measurably faster than the happy path, an attacker can distinguish "key
- * exists" from "key doesn't exist" via response timing — which defeats the
- * timing-safe property this package claims.
+ * Key measurement: |E_p50 − F_p50| is bounded (target: < 50µs). This is a noisy
+ * wall-clock smoke benchmark, not a claim of perfectly identical latency. The
+ * deterministic tests separately assert that both paths execute their intended
+ * hash-and-compare work.
  *
  * Usage:
  *   npx ts-node bench/api-keys.bench.ts
@@ -211,8 +212,11 @@ async function run() {
     validKeys.push(key);
   }
 
-  // Generate an invalid key with the same shape (exists-in-format but not in storage).
-  const invalidKey = generateKey({ namespace: 'bench', environment: 'live' }).raw;
+  // Generate an unknown-prefix key and a known-prefix key with a wrong secret.
+  const unknownPrefixKey = generateKey({ namespace: 'bench', environment: 'live' }).raw;
+  const knownPrefixWrongSecretKey = `${validKeys[0].slice(0, -1)}${
+    validKeys[0].endsWith('a') ? 'b' : 'a'
+  }`;
 
   // ── D) Service.verify() happy path ─────────────────────────────
   const happyStats = await measure(
@@ -222,26 +226,47 @@ async function run() {
     },
   );
 
-  // ── E) Service.verify() invalid (not found) ────────────────────
-  let caught = 0;
-  const invalidStats = await measure(
-    'E) ApiKeysService.verify()  — INVALID (not found)',
+  // ── E) Service.verify() unknown prefix ─────────────────────────
+  let unknownCaught = 0;
+  const unknownStats = await measure(
+    'E) ApiKeysService.verify()  — UNKNOWN prefix',
     async () => {
       try {
-        await service.verify(invalidKey);
+        await service.verify(unknownPrefixKey);
       } catch (err) {
-        if (err instanceof ApiKeyError) caught += 1;
+        if (err instanceof ApiKeyError) unknownCaught += 1;
       }
     },
   );
-  if (caught !== ITERATIONS + WARMUP) {
-    console.error(`\n✗ expected ${ITERATIONS + WARMUP} ApiKeyError instances, got ${caught}`);
+  if (unknownCaught !== ITERATIONS + WARMUP) {
+    console.error(
+      `\n✗ expected ${ITERATIONS + WARMUP} unknown-prefix ApiKeyError instances, got ${unknownCaught}`,
+    );
     process.exit(1);
   }
 
-  // ── F) create() + verify() round-trip ──────────────────────────
+  // ── F) Service.verify() known prefix, wrong secret ─────────────
+  let knownCaught = 0;
+  const knownInvalidStats = await measure(
+    'F) ApiKeysService.verify()  — KNOWN prefix, wrong secret',
+    async () => {
+      try {
+        await service.verify(knownPrefixWrongSecretKey);
+      } catch (err) {
+        if (err instanceof ApiKeyError) knownCaught += 1;
+      }
+    },
+  );
+  if (knownCaught !== ITERATIONS + WARMUP) {
+    console.error(
+      `\n✗ expected ${ITERATIONS + WARMUP} known-prefix ApiKeyError instances, got ${knownCaught}`,
+    );
+    process.exit(1);
+  }
+
+  // ── G) create() + verify() round-trip ──────────────────────────
   const roundTripStats = await measure(
-    'F) create() + verify()  — round-trip',
+    'G) create() + verify()  — round-trip',
     async (i) => {
       const { key } = await service.create({
         tenantId,
@@ -259,26 +284,26 @@ async function run() {
   const hasherOverhead = hashStats.avg - rawStats.avg;
   console.log(`  Hasher wrapper overhead (B − A):                  ~${fmt(hasherOverhead)}  (${((hasherOverhead / rawStats.avg) * 100).toFixed(1)}% of raw SHA-256)`);
   console.log(`  Service.verify() happy-path (D, avg):             ~${fmt(happyStats.avg)}`);
-  console.log(`  Service.verify() invalid-path (E, avg):           ~${fmt(invalidStats.avg)}`);
-  console.log(`  Round-trip create+verify (F, avg):                ~${fmt(roundTripStats.avg)}`);
+  console.log(`  Service.verify() unknown-prefix (E, avg):         ~${fmt(unknownStats.avg)}`);
+  console.log(`  Service.verify() known-invalid (F, avg):          ~${fmt(knownInvalidStats.avg)}`);
+  console.log(`  Round-trip create+verify (G, avg):                ~${fmt(roundTripStats.avg)}`);
   console.log(`  Auth throughput (1/D.avg):                        ~${(1000 / happyStats.avg).toFixed(0)} verifications/sec per core`);
 
-  // Timing-safe validation.
-  const deltaP50 = Math.abs(happyStats.p50 - invalidStats.p50);
-  const deltaPct = (deltaP50 / happyStats.p50) * 100;
+  // Bounded timing validation. This smoke check does not claim identical wall-clock latency.
+  const deltaP50 = Math.abs(unknownStats.p50 - knownInvalidStats.p50);
+  const deltaPct = (deltaP50 / knownInvalidStats.p50) * 100;
 
   console.log(`\n  Timing-safe check`);
   console.log(`  ──────────────────────────────────────────────────────`);
-  console.log(`  |D − E| @ P50:                                   ${fmt(deltaP50)}  (${deltaPct.toFixed(1)}% of happy-path P50)`);
-  console.log(`  Threshold:                                        ${fmt(TIMING_THRESHOLD_MS)}  (${((TIMING_THRESHOLD_MS / happyStats.p50) * 100).toFixed(1)}% of happy-path P50)`);
+  console.log(`  |E − F| @ P50:                                   ${fmt(deltaP50)}  (${deltaPct.toFixed(1)}% of known-invalid P50)`);
+  console.log(`  Threshold:                                        ${fmt(TIMING_THRESHOLD_MS)}  (${((TIMING_THRESHOLD_MS / knownInvalidStats.p50) * 100).toFixed(1)}% of known-invalid P50)`);
 
   if (deltaP50 > TIMING_THRESHOLD_MS) {
-    console.error(`\n  ✗ FAIL — invalid-path latency diverges from happy-path by more than ${fmt(TIMING_THRESHOLD_MS)}.`);
-    console.error(`       This suggests the dummyVerify() fallback is not compensating for the real hash.`);
-    console.error(`       An attacker could distinguish "prefix exists" from "prefix missing" via timing.`);
+    console.error(`\n  ✗ FAIL — unknown and known-invalid paths diverge by more than ${fmt(TIMING_THRESHOLD_MS)}.`);
+    console.error(`       Inspect dummyVerify() and known-prefix hash/compare work before release.`);
     process.exit(1);
   }
-  console.log(`  ✓ PASS — happy and invalid paths are within ${fmt(TIMING_THRESHOLD_MS)} at P50. Timing-safe property holds.`);
+  console.log(`  ✓ PASS — unknown and known-invalid paths are within ${fmt(TIMING_THRESHOLD_MS)} at P50.`);
 
   console.log('\nDone.\n');
 }

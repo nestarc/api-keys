@@ -308,6 +308,17 @@ Verification and authorization failures throw `ApiKeyError` with a stable `code`
 
 Use these codes (not messages) to branch in client code or structured logs.
 
+`ApiKeyError` extends Nest's `HttpException`, so the default Nest HTTP pipeline returns the
+table's 401/403 status without a custom exception filter. Its public response body is limited to
+`statusCode` and `code`; parser details, raw credentials, hashes, peppers, and stacks are not
+included. Direct service consumers can continue to use `error instanceof ApiKeyError`,
+`error.code`, and the backward-compatible `error.httpStatus` property. New Nest integrations may
+prefer `error.getStatus()`; `httpStatus` is retained and is not deprecated in this release.
+
+Lifecycle details are secret-first: a wrong secret always returns `api_key_invalid`, even when its
+prefix belongs to a revoked or expired record. Only a caller presenting the valid secret can
+receive `api_key_revoked` or `api_key_expired`.
+
 Rotation precondition failures throw `ApiKeyOperationError` with `api_key_record_not_found` or `api_key_not_rotatable`.
 
 ## Logging
@@ -362,6 +373,10 @@ metadata, compile the packed public declarations with `skipLibCheck: false`, and
 application context. They reject inherited npm bypass settings and explicitly keep
 `--legacy-peer-deps` and `--force` disabled.
 `npm run test:consumer:strict` defaults to the modern lane.
+
+`npm run test:consumer:http:nest10` and `npm run test:consumer:http:nest11` pack the library and
+exercise the default Nest HTTP exception pipeline with the exact supported Nest versions. They
+verify the 401/403 status matrix and the safe public error body without installing a custom filter.
 
 Releases are tag-driven: `npm version <bump> && git push --tags` triggers the workflow in
 [`.github/workflows/release.yml`](.github/workflows/release.yml), which repeats the Prisma matrix

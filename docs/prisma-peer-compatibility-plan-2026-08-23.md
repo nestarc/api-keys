@@ -8,7 +8,7 @@
 
 ## 작업 결과 (2026-08-23)
 
-상태: **구현 및 로컬 검증 완료**
+상태: **`0.3.1` npm 배포 및 peer metadata 검증 완료**
 
 - `PrismaApiKeyStorage`의 기존 공통 storage contract와 Prisma 전용 field mapping,
   tenant isolation, transaction rollback 사례를 PostgreSQL 16에서 실행하도록 추가했다.
@@ -24,9 +24,11 @@
 - `nestjs-tenancy` ecosystem runner에서 `--legacy-peer-deps`와 관련 주석을 제거하고,
   로컬 API Keys tarball을 사용한 전체 ecosystem E2E 3개 test를 strict install로
   통과했다.
-- 형제 저장소가 없는 `nestjs-tenancy`의 published-only CI/release 경로는 이 peer
-  metadata가 포함된 API Keys 버전을 먼저 배포한 뒤 다시 실행해야 한다. 이는 남은
-  코드 workaround가 아니라 cross-repository release ordering 제약이다.
+- `@nestarc/api-keys@0.3.1`이 npm `latest`로 배포됐고 registry manifest의 optional
+  `@prisma/client` peer가 `^5.0.0 || ^6.0.0`인 것을 확인했다.
+- 형제 저장소 탐색을 비활성화한 `nestjs-tenancy` published-only 경로에서 실제
+  `@nestarc/api-keys@0.3.1` strict install, Prisma 6 client 생성, installed artifact
+  version, tenant propagation 및 fail-closed를 포함한 전체 3개 E2E test가 통과했다.
 
 실행 결과:
 
@@ -41,7 +43,26 @@ Tenancy ecosystem runner unit contract    1 suite, 4 tests PASS
 Tenancy lint/build                        PASS
 Tenancy unit/integration                  47 suites, 554 tests PASS
 Tenancy strict ecosystem E2E              1 suite, 3 tests PASS
+npm registry latest/version               0.3.1 PASS
+npm registry optional Prisma peer         ^5.0.0 || ^6.0.0 PASS
+Published-only strict ecosystem E2E        1 suite, 3 tests PASS
 ```
+
+### 배포 후 확인 결과
+
+2026-08-23 KST 기준 npm registry에서 다음을 직접 확인했다.
+
+```text
+version                              0.3.1
+dist-tags.latest                     0.3.1
+peerDependencies.@prisma/client      ^5.0.0 || ^6.0.0
+peerDependenciesMeta optional        true
+published at                         2026-08-23T13:41:13.357Z
+```
+
+따라서 API Keys의 배포와 package metadata 작업은 완료됐다. tenancy fixture의 artifact
+version 기대값도 `0.3.1`로 갱신했고, 실제 published package만 사용하는 strict ecosystem
+lane 전체가 통과했다.
 
 ## 1. 작업 전 상태
 
@@ -217,6 +238,10 @@ devDependency를 Prisma 6으로 즉시 고정하면 Prisma 5 회귀를 놓칠 �
 - [x] tenancy ecosystem runner에서 `--legacy-peer-deps` 제거
 - [x] workaround 제거 후 tenancy ecosystem E2E 통과
 - [x] README/CHANGELOG에 실제 검증 범위가 기록됨
+- [x] `@nestarc/api-keys@0.3.1` npm 배포 및 `latest` 확인
+- [x] published artifact의 optional Prisma peer metadata 확인
+- [x] published-only Prisma 6 strict install 및 핵심 runtime test 통과
+- [x] tenancy fixture artifact 기대 버전을 `0.3.1`로 갱신한 뒤 published-only 전체 suite 통과
 
 ## 6. 권장 검증 명령
 
@@ -252,20 +277,50 @@ npm run test:e2e:ecosystem
 
 ## 7. 비범위 및 주의사항
 
-- Prisma 7 지원은 별도 검증 없이 peer 범위에 추가하지 않는다.
+- Prisma 7 지원은 peer 범위에 추가하기 전에 실 PostgreSQL과 strict consumer로 검증한다.
+  아래 `0.3.2` 후보 후속이 이 조건을 충족한다.
 - API Keys의 in-memory/custom storage 사용자는 Prisma 설치를 강제받지 않아야 한다.
 - peer 충돌을 없애기 위해 `@prisma/client`을 runtime dependency로 옮기지 않는다.
 - `--legacy-peer-deps`를 영구적인 해결책으로 문서화하지 않는다.
 - Prisma adapter가 transaction을 제공받았을 때 rotation은 반드시 원자성을 유지해야 한다.
-- 이 작업은 `@nestarc/jobs` handler auto-discovery 초기화 문제와 별개다. jobs의 수동 `HandlerRegistry` workaround는 이 변경으로 해결되지 않는다.
+- 이 API Keys 작업은 `@nestarc/jobs` handler auto-discovery 초기화 문제와 별개였다. 이후 Jobs `0.3.1`이 application-bootstrap discovery를 구현하고 tenancy의 수동 `HandlerRegistry` workaround를 제거했으며 published-only ecosystem E2E를 통과했다.
 
-## 8. 작업 시작용 프롬프트
+## 8. Cross-package 후속 완료 상태
+
+Prisma 5/6 peer metadata와 `0.3.1` 배포 작업에는 남은 항목이 없다. 별개 후속이었던
+`@nestarc/jobs` handler auto-discovery 초기화 계약도 Jobs `0.3.1`과 tenancy
+published-only strict lane으로 완료됐다.
+
+### `0.3.2` Nest 11 / Prisma 7 후보 후속 (2026-08-30)
+
+TEN-M21의 API Keys 선행 조건을 충족하도록 다음을 별도 패치 후보에 추가했다.
+
+- Nest peer를 `^10.0.0 || ^11.0.0`, optional Prisma client peer를
+  `^5.0.0 || ^6.0.0 || ^7.0.0`으로 확대했다.
+- exact Prisma CLI/client/adapter `7.10.0`을 격리 prefix에 strict 설치하고 새
+  `prisma-client` generator, Prisma Config, `PrismaPg`를 사용해 PostgreSQL 16 storage
+  contract 1 suite/11 tests를 통과했다.
+- packed `0.3.2` tarball을 exact Nest `11.2.1`/Prisma `7.10.0` consumer에
+  `--strict-peer-deps`로 설치하고 installed version, peer metadata, package example,
+  `skipLibCheck: false` public declaration compile, Nest application-context의 API key
+  create/verify runtime을 확인했다. 대소문자를 구분하지 않고 `yes/on`까지 npm bypass
+  환경 설정을 거부하며 install 명령에도 `force=false`, `legacy-peer-deps=false`를 명시한다.
+- 기존 exact Nest `10.4.20`/Prisma `6.19.3` strict consumer와 Prisma 5.22.0
+  PostgreSQL contract도 그대로 통과했다.
+- root dev-only `@nestarc/rbac@0.2.0`의 Prisma `<7` peer 때문에 root tree에 Prisma 7을
+  직접 덮어쓰는 설치는 `ERESOLVE`한다. CI/release E2E runtime을 `$RUNNER_TEMP`에
+  격리해 이 무관한 dev-tree 충돌을 피하며, `--force`와 `--legacy-peer-deps`는 사용하지 않는다.
+
+이 기록은 아직 npm 배포 완료를 뜻하지 않는다. `@nestarc/api-keys@0.3.2` publish와 registry
+peer metadata 확인 후에만 TEN-M21 published-only 준비 완료 증거로 사용할 수 있다.
+
+회귀 확인용 프롬프트:
 
 ```text
-docs/prisma-peer-compatibility-plan-2026-08-23.md를 읽고,
-@nestarc/api-keys의 PrismaApiKeyStorage를 Prisma 5.22.0/6.19.3 실제 client로 검증하는
-실DB E2E와 CI matrix를 추가한 뒤 @prisma/client optional peer 범위를
-^5.0.0 || ^6.0.0으로 넓혀 주세요. tarball 기반 strict consumer install을 확인하고,
-모든 API Keys 검증이 통과하면 nestjs-tenancy ecosystem runner의
---legacy-peer-deps workaround도 제거해 주세요. Prisma 7은 검증 없이 지원 범위에 추가하지 마세요.
+docs/prisma-peer-compatibility-plan-2026-08-23.md와
+nestjs-tenancy/docs/tenancy-strategy-validation-2026-08-21.md를 읽고,
+완료된 @nestarc/api-keys@0.3.1 published baseline과 @nestarc/jobs@0.3.1
+application-bootstrap handler discovery 계약을 보존하세요. @nestarc/api-keys@0.3.2가
+배포되면 registry peer metadata를 확인한 뒤 exact Nest 11.2.1/Prisma 7.10.0
+published-only ecosystem E2E를 회귀 검증해 주세요.
 ```

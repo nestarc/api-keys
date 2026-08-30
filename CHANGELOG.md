@@ -10,6 +10,15 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ## [Unreleased]
 
+### Fixed
+
+- Authenticate a known prefix's secret before revealing revoked or expired lifecycle state;
+  wrong secrets now consistently fail with `api_key_invalid` while unknown and known-prefix
+  failure paths both perform bounded hash/compare work.
+- Make `ApiKeyError` a Nest `HttpException` so the default Nest 10/11 HTTP pipeline returns the
+  documented 401/403 status and a safe `{ statusCode, code }` response body. The existing
+  `instanceof ApiKeyError`, `code`, and `httpStatus` contracts remain supported.
+
 ## [0.3.2] - 2026-08-30
 
 ### Added

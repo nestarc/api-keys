@@ -713,6 +713,73 @@ describe('ApiKeysService.verify', () => {
     await expect(service.verify(tampered)).rejects.toMatchObject({ code: 'api_key_invalid' });
   });
 
+  it.each([
+    ['active', null],
+    ['revoked', 'revoked'],
+    ['expired', 'expired'],
+  ] as const)(
+    'does not reveal the %s lifecycle state until the secret is authenticated',
+    async (_state, lifecycle) => {
+      const { service } = svc();
+      const created = await service.create({
+        tenantId: 't1',
+        name: lifecycle ?? 'active',
+        scopes: [{ resource: 'r', level: 'read' }],
+        ...(lifecycle === 'expired'
+          ? { expiresAt: new Date('2025-01-01T00:00:00Z') }
+          : {}),
+      });
+      if (lifecycle === 'revoked') {
+        await service.revoke(created.id);
+      }
+
+      const wrongSecret = `${created.key.slice(0, -1)}${created.key.endsWith('a') ? 'b' : 'a'}`;
+      await expect(service.verify(wrongSecret)).rejects.toMatchObject({
+        code: ApiKeyErrorCode.Invalid,
+      });
+
+      if (lifecycle === 'revoked') {
+        await expect(service.verify(created.key)).rejects.toMatchObject({
+          code: ApiKeyErrorCode.Revoked,
+        });
+      } else if (lifecycle === 'expired') {
+        await expect(service.verify(created.key)).rejects.toMatchObject({
+          code: ApiKeyErrorCode.Expired,
+        });
+      } else {
+        await expect(service.verify(created.key)).resolves.toMatchObject({ keyId: created.id });
+      }
+    },
+  );
+
+  it('uses one real verify for known prefixes and one dummy verify for unknown prefixes', async () => {
+    const hasher = new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 });
+    const verify = jest.spyOn(hasher, 'verify');
+    const dummyVerify = jest.spyOn(hasher, 'dummyVerify');
+    const { service } = svc({ hasher });
+    const created = await service.create({
+      tenantId: 't1',
+      name: 'known',
+      scopes: [{ resource: 'r', level: 'read' }],
+    });
+    verify.mockClear();
+    dummyVerify.mockClear();
+
+    const wrongSecret = `${created.key.slice(0, -1)}${created.key.endsWith('a') ? 'b' : 'a'}`;
+    await expect(service.verify(wrongSecret)).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Invalid,
+    });
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(dummyVerify).not.toHaveBeenCalled();
+
+    verify.mockClear();
+    await expect(
+      service.verify(`nk_live_${'z'.repeat(12)}_${'z'.repeat(32)}`),
+    ).rejects.toMatchObject({ code: ApiKeyErrorCode.Invalid });
+    expect(dummyVerify).toHaveBeenCalledTimes(1);
+    expect(verify).not.toHaveBeenCalled();
+  });
+
   it('throws api_key_invalid for unknown prefix', async () => {
     const { service } = svc();
     const fake = `nk_live_${'z'.repeat(12)}_${'z'.repeat(32)}`;
