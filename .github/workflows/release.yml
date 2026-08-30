@@ -59,9 +59,9 @@ jobs:
     env:
       PRISMA_E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/api_keys_e2e?schema=public
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           package-manager-cache: false
@@ -93,9 +93,9 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
