@@ -11,6 +11,7 @@ import {
   ApiKeyClientIpResolver,
   defaultApiKeyClientIpResolver,
 } from './ip-allowlist';
+import { validateNamespace } from './input-validation';
 import type { ApiKeyStorage } from './storage/api-key-storage.interface';
 import type { ApiKeyEventSink, ApiKeyMetricSink, ApiKeyTtlPolicy } from './types';
 
@@ -37,6 +38,7 @@ export interface ApiKeysModuleOptions {
 @Module({})
 export class ApiKeysModule {
   static forRoot(options: ApiKeysModuleOptions): DynamicModule {
+    const namespace = validateNamespace(options.namespace ?? 'nk');
     const currentPepperVersion = resolveCurrentPepperVersion(options);
     const providers: Provider[] = [
       { provide: API_KEYS_OPTIONS, useValue: options },
@@ -55,7 +57,7 @@ export class ApiKeysModule {
               peppers: options.peppers,
               currentVersion: currentPepperVersion,
             }),
-            namespace: options.namespace ?? 'nk',
+            namespace,
             debounceMs: options.debounceMs,
             onAuthFailed: options.onAuthFailed,
             onEvent: options.onEvent,

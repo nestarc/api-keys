@@ -74,7 +74,10 @@ to your schema. For Prisma 7, use
 `prisma.config.ts` based on
 [`prisma/prisma.config.example.ts`](prisma/prisma.config.example.ts), then run a migration.
 
-Use a product-specific `namespace` such as `acme` or `billing` instead of relying on the default `nk`. That keeps your keys distinct if multiple packages or services generate API keys in the same ecosystem.
+Use a product-specific `namespace` such as `acme` or `billing` instead of relying on the default
+`nk`. A namespace must contain 1–32 ASCII letters or digits. That keeps keys distinct if multiple
+packages or services generate API keys in the same ecosystem while ensuring every issued key can
+be parsed and redacted by the package.
 
 ### Protect a route
 
@@ -111,7 +114,15 @@ const { id, key } = await apiKeys.create({
 nk_live_<12-char-prefix>_<32-char-secret>
 ```
 
-The 12-char prefix is safe to log and display; the 32-char secret is shown only once at creation time. Storage persists the prefix and a SHA-256 hash of the secret — never the secret itself.
+The namespace contains 1–32 ASCII letters or digits. The prefix is exactly 12 base62 characters
+and is safe to log and display; the secret is exactly 32 base62 characters and is shown only once
+at creation time. `parseKey()` rejects any other namespace, environment, prefix, secret, or segment
+shape as `api_key_malformed`. Storage persists the prefix and a SHA-256 hash of the secret — never
+the secret itself.
+
+`ApiKeysModule.forRoot()`, direct `ApiKeysService` construction, and `generateKey()` reject an
+invalid namespace with `ApiKeyOperationError` code `api_key_invalid_input`. Validation happens
+before random key material is generated.
 
 ## Environments
 
@@ -128,6 +139,20 @@ publish() {
 ```
 
 Use `test` keys in staging and customer sandbox traffic so a leaked test key can never charge a live account.
+
+Runtime callers, including untyped JavaScript callers, must pass exactly `live` or `test`; other
+values fail with `api_key_invalid_input` before key generation or storage mutation.
+
+## Scope input
+
+At least one scope is required. A scope resource is 1–128 ASCII characters, starts with a letter
+or digit, and may then contain letters, digits, `.`, `_`, `/`, or `-`. The `:` delimiter is reserved
+for the stored `resource:level` representation and cannot appear in a resource. The level must be
+exactly `read` or `write`.
+
+These rules are enforced at runtime before key generation or storage mutation. Invalid scope
+input throws `ApiKeyOperationError` with `api_key_invalid_input`; duplicate valid scopes are still
+deduplicated before persistence.
 
 ## IP allowlists
 
@@ -360,11 +385,12 @@ prefix belongs to a revoked or expired record. Only a caller presenting the vali
 receive `api_key_revoked` or `api_key_expired`.
 
 Operation failures throw `ApiKeyOperationError` with `api_key_record_not_found`,
-`api_key_not_rotatable`, or `api_key_invalid_time`.
+`api_key_not_rotatable`, `api_key_invalid_time`, or `api_key_invalid_input`.
 
 ## Logging
 
-Never log raw API keys. The package exports `API_KEY_REDACT_REGEX` so you can redact them before request or error logs are written.
+Never log raw API keys. The package exports `API_KEY_REDACT_REGEX` so every key producible under
+the namespace and base62 format contract can be redacted before request or error logs are written.
 
 ```typescript
 import { API_KEY_REDACT_REGEX } from '@nestarc/api-keys';

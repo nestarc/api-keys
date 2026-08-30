@@ -5,6 +5,19 @@ import { API_KEY_CLIENT_IP_RESOLVER } from './ip-allowlist';
 import { InMemoryApiKeyStorage } from './storage/in-memory-storage';
 
 describe('ApiKeysModule.forRoot', () => {
+  it.each(['', 'under_score', 'punctuation!', 'a'.repeat(33)])(
+    'rejects invalid namespace %p during module configuration',
+    (namespace) => {
+      expect(() =>
+        ApiKeysModule.forRoot({
+          namespace,
+          peppers: { 1: 'p'.repeat(32) },
+          storage: new InMemoryApiKeyStorage(),
+        }),
+      ).toThrow(expect.objectContaining({ code: 'api_key_invalid_input' }));
+    },
+  );
+
   it('throws a clear error when peppers is empty', () => {
     expect(() =>
       ApiKeysModule.forRoot({

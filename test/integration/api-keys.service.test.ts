@@ -5,6 +5,7 @@ import {
 } from '../../src/errors';
 import { ApiKeysService } from '../../src/api-keys.service';
 import { Sha256Hasher } from '../../src/hasher';
+import { API_KEY_REDACT_REGEX, parseKey } from '../../src/key-format';
 import type { ApiKeyStorage } from '../../src/storage/api-key-storage.interface';
 import { InMemoryApiKeyStorage } from '../../src/storage/in-memory-storage';
 import { PrismaApiKeyStorage, type PrismaLike } from '../../src/storage/prisma-storage';
@@ -88,6 +89,78 @@ function prismaStorageSpy(): {
 }
 
 describe('ApiKeysService.create', () => {
+  it.each([
+    ['invalid environment', { environment: 'prod' }],
+    ['empty resource', { scopes: [{ resource: '', level: 'read' }] }],
+    ['resource delimiter', { scopes: [{ resource: 'reports:admin', level: 'read' }] }],
+    ['oversized resource', { scopes: [{ resource: 'a'.repeat(129), level: 'read' }] }],
+    ['invalid level', { scopes: [{ resource: 'reports', level: 'admin' }] }],
+  ])('rejects untyped %s before storage mutation', async (_case, invalidInput) => {
+    const insert = jest.fn();
+    const prisma = prismaStorageSpy();
+
+    for (const storage of [
+      {
+        insert,
+        findById: jest.fn(),
+        findByPrefix: jest.fn(),
+        listByTenant: jest.fn(),
+        markRevoked: jest.fn(),
+        touchLastUsed: jest.fn(),
+        rotate: jest.fn(),
+      } as ApiKeyStorage,
+      prisma.storage,
+    ]) {
+      const { service } = svc({ storage });
+      await expect(
+        service.create({
+          tenantId: 't1',
+          name: 'invalid runtime input',
+          scopes: [{ resource: 'reports', level: 'read' }],
+          ...invalidInput,
+        } as never),
+      ).rejects.toMatchObject({ code: 'api_key_invalid_input' });
+    }
+
+    expect(insert).not.toHaveBeenCalled();
+    expect(prisma.create).not.toHaveBeenCalled();
+  });
+
+  it('validates the namespace for direct service construction', () => {
+    expect(
+      () =>
+        new ApiKeysService({
+          storage: new InMemoryApiKeyStorage(),
+          hasher: new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 }),
+          namespace: 'under_score',
+        }),
+    ).toThrow(expect.objectContaining({ code: 'api_key_invalid_input' }));
+  });
+
+  it.each(['live', 'test'] as const)(
+    'supports create, parse, verify, and log redaction round-trip in %s',
+    async (environment) => {
+      const { service } = svc();
+      const created = await service.create({
+        tenantId: 't1',
+        name: `${environment} round trip`,
+        environment,
+        scopes: [{ resource: 'reports/v2.export_jobs', level: 'write' }],
+      });
+
+      const parsed = parseKey(created.key);
+      await expect(service.verify(created.key)).resolves.toMatchObject({
+        keyId: created.id,
+        environment,
+        scopes: ['reports/v2.export_jobs:write'],
+      });
+      expect(parsed).toMatchObject({ namespace: 'nk', environment });
+      expect(JSON.stringify({ key: created.key }).replace(API_KEY_REDACT_REGEX, '[REDACTED]')).toBe(
+        '{"key":"[REDACTED]"}',
+      );
+    },
+  );
+
   it('returns a key and stores a hashed record', async () => {
     const { service, storage } = svc();
 

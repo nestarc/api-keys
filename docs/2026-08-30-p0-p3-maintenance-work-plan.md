@@ -147,7 +147,7 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 1 | `AK-M01` | P0 | `DONE` | L | 없음 | secret-first lifecycle 판정과 Nest 기본 HTTP 401/403 계약 복구 |
 | 2 | `AK-M02` | P0 | `DONE` | L | 없음 | concurrent rotation을 exactly-once CAS로 변경 |
 | 3 | `AK-M03` | P1 | `DONE` | M | 없음 | 시간/TTL/grace 입력과 손상 record fail-closed |
-| 4 | `AK-M04` | P1 | `READY` | M | 없음 | namespace·environment·scope·parser·redaction round-trip 계약 |
+| 4 | `AK-M04` | P1 | `DONE` | M | 없음 | namespace·environment·scope·parser·redaction round-trip 계약 |
 | 5 | `AK-M05` | P1 | `READY` | M | 없음 | observer/contextWriter 경계와 인증 context whole-object 불변성 |
 | 6A | `AK-M06A` | P1 | `READY` | S | 없음 | tenant ID producer canonicalization ADR |
 | 6B | `AK-M06B` | P1 | `BLOCKED` | M | `AK-M06A`, `RBAC-M01`+`RBAC-M02` 포함 published RBAC | tenant ID producer 계약 구현과 packed RBAC consumer |
@@ -163,7 +163,7 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 11 | `AK-M11` | P1 | `BLOCKED` | S | `AK-M08A`, `AK-M08C` | coverage floor와 CI evidence |
 | 12 | `AK-M15` | P2 | `DECISION` | S | 없음 | list의 active/expired/grace semantics 정렬 |
 | 13 | `AK-M12` | P2 | `BLOCKED` | M | `AK-M15` | public list DTO에서 verifier material 제거 |
-| 14 | `AK-M13` | P2 | `BLOCKED` | S | `AK-M04` | raw key environment와 stored environment bind |
+| 14 | `AK-M13` | P2 | `READY` | S | `AK-M04` | raw key environment와 stored environment bind |
 | 15 | `AK-M16` | P2 | `BLOCKED` | S | `AK-M05` | InMemory storage record Date defensive copy |
 | 16A | `AK-M17A` | P2 | `DECISION` | S | 없음 | `SECURITY.md`와 지원 release policy |
 | 16B | `AK-M17B` | P2 | `EXTERNAL` | S | `AK-M17A` | GitHub reporting/security/ruleset 설정 |
@@ -301,23 +301,34 @@ secret이 일치한 뒤 custom storage의 손상된 non-null expiry를 발견하
 
 ### `AK-M04` — namespace·runtime input·key format·redaction 계약
 
-- 상태: `P1 / READY`
+- 상태: `P1 / DONE`
 - 문제: namespace를 검증하지 않아 일부 키는 발급 직후 parse할 수 없거나 공식 redaction regex가 secret을 가리지 못한다. untyped/JavaScript caller의 invalid environment나 scope도 storage mutation 전 runtime에서 거부되지 않는다.
 
 완료 조건:
 
-- [ ] 허용 charset과 길이를 public contract로 정의한다.
-- [ ] module, direct service, `generateKey()`가 같은 중앙 validator를 사용한다.
-- [ ] runtime environment는 정확히 `live|test`, scope level은 `read|write`이며 resource의 empty/delimiter/길이 정책을 중앙 validator로 적용한다.
-- [ ] invalid environment/scope는 key 생성과 storage mutation 전에 stable input error로 거부한다.
-- [ ] 발급 가능한 모든 key는 parse → verify → redact round-trip을 만족한다.
-- [ ] empty, underscore 포함, redaction에 안전하지 않은 namespace는 key 발급 전에 거부된다.
-- [ ] parser가 prefix/secret base62 문법도 검증한다.
-- [ ] 기존 punctuation namespace 사용자의 호환/마이그레이션 전략을 CHANGELOG에 기록한다.
+- [x] 허용 charset과 길이를 public contract로 정의한다.
+- [x] module, direct service, `generateKey()`가 같은 중앙 validator를 사용한다.
+- [x] runtime environment는 정확히 `live|test`, scope level은 `read|write`이며 resource의 empty/delimiter/길이 정책을 중앙 validator로 적용한다.
+- [x] invalid environment/scope는 key 생성과 storage mutation 전에 stable input error로 거부한다.
+- [x] 발급 가능한 모든 key는 parse → verify → redact round-trip을 만족한다.
+- [x] empty, underscore 포함, redaction에 안전하지 않은 namespace는 key 발급 전에 거부된다.
+- [x] parser가 prefix/secret base62 문법도 검증한다.
+- [x] 기존 punctuation namespace 사용자의 호환/마이그레이션 전략을 CHANGELOG에 기록한다.
 
 검증: 프로필 A/B/D, JavaScript/untyped runtime input table, generated-key property/table tests, logger serialization test.
 
 비범위: 새로운 versioned key format, namespace 자동 변환.
+
+완료 결정(2026-08-30): namespace는 ASCII 영숫자 1–32자이며 module 설정, direct service
+constructor, `generateKey()`가 같은 중앙 validator로 fail fast한다. environment는 정확히
+`live|test`, scope resource는 ASCII 영숫자로 시작하는 1–128자의 영숫자/`.`/`_`/`/`/`-`,
+level은 정확히 `read|write`로 고정했다. 잘못된 발급 입력은 random key 생성과 InMemory/Prisma
+storage mutation 전에 public `ApiKeyOperationError`의 `api_key_invalid_input`으로 거부한다.
+parser는 namespace/environment와 12/32자 base62 prefix/secret까지 검사하되 외부 credential
+실패 code는 `api_key_malformed`를 유지한다. 허용된 경계 namespace와 live/test 발급 key는
+parse → verify → JSON logger redaction round-trip table을 통과한다. 기존 punctuation/장문
+namespace는 자동 변환하지 않으며 0.4.0 전에 기존 버전으로 credential을 재발급하는 migration을
+CHANGELOG에 기록했다.
 
 ### `AK-M05` — observer payload와 인증 context whole-object 불변성
 
@@ -520,7 +531,7 @@ secret이 일치한 뒤 custom storage의 손상된 non-null expiry를 발견하
 
 ### `AK-M13` — environment segment binding
 
-- 상태: `P2 / BLOCKED (AK-M04)`
+- 상태: `P2 / READY`
 
 완료 조건:
 
@@ -796,7 +807,7 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 - [x] `AK-M01`: wrong-secret lifecycle oracle/hash-work regression과 Nest 10/11 actual HTTP 401/403 E2E
 - [x] `AK-M02`: real PostgreSQL concurrent rotation exactly-once CAS
 - [x] `AK-M03`: invalid time/duration pre-mutation 및 corrupt persisted expiry fail-closed contract
-- [ ] `AK-M04`: runtime environment/scope와 generated key parse/verify/redact property contract
+- [x] `AK-M04`: runtime environment/scope와 generated key parse/verify/redact property contract
 - [ ] `AK-M05`: observer/contextWriter whole-object mutation negative contract
 - [ ] `AK-M06B`: packed API Keys candidate → published RBAC canonical/conflict consumer
 - [ ] `AK-M07A`: missing/denial telemetry semantics; `AK-M07B`: request-aware IP restriction contract
@@ -810,13 +821,13 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 
 ## 10. 다음 세션 권장 시작점
 
-1. 현재 worktree의 `AK-M03` diff를 검토하고 이 변경만 별도 P1 commit/PR로 종료한다.
+1. 현재 worktree의 `AK-M04` diff를 검토하고 이 변경만 별도 P1 commit/PR로 종료한다.
 2. merge 뒤 최신 main에서 새 branch/worktree를 만든다.
-3. 실행 큐상 다음인 `AK-M04`만 선택한다.
-4. namespace/environment/scope runtime 표와 발급→parse→verify→redact round-trip RED test를 먼저 만든다.
-5. AK-M01~M03의 인증, atomic rotation, 시간값 fail-closed contract와 Prisma 5/6/7 lane을 회귀 gate로 유지한다.
+3. 실행 큐상 다음인 `AK-M05`만 선택한다.
+4. event sink와 contextWriter가 payload/object를 변경하는 observer/context RED test를 먼저 만든다.
+5. AK-M01~M04의 인증, atomic rotation, 시간값, runtime input과 round-trip contract를 회귀 gate로 유지한다.
 
-`AK-M03`과 `AK-M04`를 한 PR에 넣지 않는다. dependency/toolchain 변경도 P1 수정과 섞지 않는다.
+`AK-M04`와 `AK-M05`를 한 PR에 넣지 않는다. dependency/toolchain 변경도 P1 수정과 섞지 않는다.
 
 ## 11. 작업 기록
 
@@ -826,6 +837,7 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 | 2026-08-30 | `AK-M01` | `DONE` | `408ca80` | `408ca80 + worktree` (PR/release 없음) | profile A 11 suites/85 tests, profile B 84.21/77.61/81.94/83.73, Nest 10.4.20/11.2.1 packed HTTP PASS, benchmark smoke PASS | AK-M01 단독 patch commit/PR 뒤 `AK-M02` 시작 |
 | 2026-08-30 | `AK-M02` | `DONE` | `ea2ebb7` | `ea2ebb7 + worktree` (PR/release 없음) | profile A 11 suites/93 tests, profile B 85.55/80.56/80.82/85.14, Prisma 5/6/7 PostgreSQL 각 18 tests, strict legacy/modern PASS | AK-M02 단독 0.4.0 PR 뒤 `AK-M03` 시작 |
 | 2026-08-30 | `AK-M03` | `DONE` | `c6c343a` | `c6c343a + worktree` (PR/release 없음) | profile A 11 suites/116 tests, profile B 86.82/81.85/83.11/86.49, Prisma 5/6/7 PostgreSQL 각 18 tests, build/audit PASS | AK-M03 단독 P1 PR 뒤 `AK-M04` 시작 |
+| 2026-08-30 | `AK-M04` | `DONE` | `2a867ca` | `2a867ca + worktree` (PR/release 없음) | profile A 11 suites/148 tests, profile B 87.54/83.26/84.70/87.30, build/pack 46 entries/bench/audit PASS | AK-M04 단독 0.4.0 P1 PR 뒤 `AK-M05` 시작 |
 
 ### AK-M01 종료 인계
 
@@ -925,4 +937,46 @@ Unverified paths and reason: remote GitHub CI/release jobs과 strict packed cons
 External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
 Next exact action: AK-M03 파일만 검토·commit해 별도 P1 PR로 merge한 뒤 AK-M04의 runtime
   namespace/environment/scope 및 parse/verify/redact round-trip RED table을 추가한다.
+```
+
+### AK-M04 종료 인계
+
+```text
+Task: AK-M04
+State: DONE
+Start ref / end ref: 2a867ca / 2a867ca + session worktree (commit·PR·release 없음)
+Changed files: src/input-validation.ts, src/key-format.ts, src/key-format.test.ts,
+  src/scope-matcher.ts, src/scope-matcher.test.ts, src/api-keys.service.ts,
+  src/api-keys.module.ts, src/api-keys.module.test.ts, src/errors.ts, src/errors.test.ts,
+  src/index.ts, test/integration/api-keys.service.test.ts, README.md, CHANGELOG.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: namespace는 ASCII 영숫자 1–32자, environment는 live|test, scope resource는
+  ASCII 영숫자로 시작하고 영숫자, dot, underscore, slash, hyphen으로 구성된 1–128자,
+  level은 read|write다. invalid issue input은
+  key 생성/storage mutation 전 api_key_invalid_input으로 거부한다. parser의 외부 실패는
+  api_key_malformed를 유지하며 namespace/environment와 base62 12/32자 segment를 모두 검사한다.
+  normalization은 하지 않으며 기존 punctuation/장문 namespace는 0.4.0 전 재발급한다.
+Commands and exact results:
+  RED: npm test -- --runInBand src/key-format.test.ts src/scope-matcher.test.ts
+    src/api-keys.module.test.ts test/integration/api-keys.service.test.ts
+    => expected FAIL; 4 suites failed, 18 tests failed (invalid runtime input 발급,
+       unsafe namespace 허용, non-base62 parser 허용; scope table은 구현 전 type failure 포함)
+  npm run lint => PASS
+  ./node_modules/.bin/tsc --noEmit -p tsconfig.build.json => PASS
+  npm test -- --runInBand => 11 suites, 148 tests PASS
+  fresh Jest coverage (/tmp/api-keys-m04-coverage.ISwcKj) => statements 87.54%,
+    branches 83.26%, functions 84.70%, lines 87.30%
+  npm run build => PASS
+  npm_config_cache=/tmp/api-keys-m04-npm-cache npm pack --dry-run --json
+    => PASS, 46 entries; first default-cache attempt은 user cache EPERM 뒤 temp cache로 재실행
+  npm run bench:smoke => PASS; local |unknown-known invalid| p50 0.2µs, bound 500µs
+  npm audit --omit=dev --json => production vulnerabilities 0; sandbox DNS 실패 뒤 승인된
+    registry access와 session temp cache로 재실행
+  git diff --check => PASS
+Unverified paths and reason: remote GitHub CI/release jobs은 push 전이라 미실행. AK-M04는 storage
+  schema/Prisma 또는 support matrix를 바꾸지 않아 profile C real PostgreSQL/strict consumer는
+  계획된 검증 범위에서 제외했고 InMemory/custom 및 Prisma create spy로 mutation 전 거부를 검증했다.
+External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
+Next exact action: AK-M04 파일만 검토·commit해 pre-1.0 0.4.0 대상 단독 P1 PR로 merge한 뒤
+  AK-M05의 observer/contextWriter whole-object mutation RED test를 추가한다.
 ```

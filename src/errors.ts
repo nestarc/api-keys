@@ -45,6 +45,7 @@ export const ApiKeyOperationErrorCode = {
   NotFound: 'api_key_record_not_found',
   NotRotatable: 'api_key_not_rotatable',
   InvalidTime: 'api_key_invalid_time',
+  InvalidInput: 'api_key_invalid_input',
 } as const;
 
 export type ApiKeyOperationErrorCode =

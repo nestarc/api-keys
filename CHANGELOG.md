@@ -25,12 +25,27 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
   invalid, non-finite, negative, or overflowing values now fail with the stable
   `api_key_invalid_time` operation code. Corrupt persisted expirations fail closed during
   verification and rotation instead of being treated as indefinitely valid.
+- Validate namespaces, runtime environments, and scope resource/level input before generating
+  key material or mutating storage. Invalid issue input now fails with the stable
+  `api_key_invalid_input` operation code, and the parser enforces base62 prefix/secret syntax so
+  every issued key satisfies parse, verify, and logger-redaction round trips.
 
 ### Changed
 
 - **Breaking in the planned pre-1.0 `0.4.0` release:** custom `ApiKeyStorage.rotate()`
   implementations must atomically return `'rotated'` or `'not_rotatable'`. Legacy `Promise<void>`
   adapters fail fast and must migrate; this change will not be published as a `0.3.x` patch.
+- **Breaking in the planned pre-1.0 `0.4.0` release:** namespaces are limited to 1–32 ASCII
+  letters or digits. Deployments using punctuation or longer namespaces must reissue credentials
+  under an alphanumeric namespace before upgrading; use the prior package version during the
+  overlap because the new module and direct service constructor fail fast on the old namespace.
+  Namespace values containing `_` already produced credentials that the four-segment parser could
+  not consume and must also be replaced. Namespace values are rejected rather than normalized so
+  credential identity never changes silently.
+- **Breaking in the planned pre-1.0 `0.4.0` release:** newly issued scope resources must follow
+  the documented 1–128 character grammar and use the reserved `:` only as the resource/level
+  separator. Existing stored keys keep their scope strings, but callers issuing new keys with
+  whitespace or other punctuation must migrate those resource names before upgrading.
 
 ## [0.3.2] - 2026-08-30
 

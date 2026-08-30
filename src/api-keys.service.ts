@@ -8,6 +8,7 @@ import {
 } from './errors';
 import { generateKey, parseKey } from './key-format';
 import { normalizeAllowedIpCidrs } from './ip-allowlist';
+import { validateEnvironment, validateNamespace } from './input-validation';
 import { flattenScopes } from './scope-matcher';
 import type { ApiKeyStorage } from './storage/api-key-storage.interface';
 import type {
@@ -64,7 +65,7 @@ export class ApiKeysService {
   constructor(deps: ApiKeysServiceDeps) {
     this.storage = deps.storage;
     this.hasher = deps.hasher;
-    this.namespace = deps.namespace;
+    this.namespace = validateNamespace(deps.namespace);
     this.idFactory = deps.idFactory ?? (() => randomUUID());
     this.clock = deps.clock ?? (() => new Date());
     this.debounceMs = validateDuration(deps.debounceMs ?? 60_000, 'debounceMs');
@@ -99,7 +100,7 @@ export class ApiKeysService {
   }
 
   async create(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
-    const environment = input.environment ?? 'live';
+    const environment = validateEnvironment(input.environment ?? 'live');
     const scopes = flattenScopes(input.scopes);
     const now = this.currentTime();
     const expiresAt = this.resolveExpiresAt(input.expiresAt, now);

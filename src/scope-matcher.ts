@@ -1,11 +1,10 @@
 import type { Scope, ScopeLevel } from './types';
+import { validateScopes } from './input-validation';
 
 export function flattenScopes(scopes: Scope[]): string[] {
-  if (scopes.length === 0) {
-    throw new Error('at least one scope is required');
-  }
+  const validatedScopes = validateScopes(scopes);
 
-  return Array.from(new Set(scopes.map((scope) => `${scope.resource}:${scope.level}`)));
+  return Array.from(new Set(validatedScopes.map((scope) => `${scope.resource}:${scope.level}`)));
 }
 
 export function scopeSatisfies(

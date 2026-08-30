@@ -51,4 +51,10 @@ describe('ApiKeyOperationError', () => {
     expect(err).toBeInstanceOf(ApiKeyOperationError);
     expect(err.code).toBe('api_key_invalid_time');
   });
+
+  it('exposes the stable invalid-input code', () => {
+    const err = new ApiKeyOperationError(ApiKeyOperationErrorCode.InvalidInput);
+
+    expect(err.code).toBe('api_key_invalid_input');
+  });
 });

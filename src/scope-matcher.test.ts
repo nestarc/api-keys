@@ -23,6 +23,25 @@ describe('flattenScopes', () => {
       ]),
     ).toEqual(['invoices:read', 'reports:write']);
   });
+
+  it.each([
+    [[{ resource: '', level: 'read' }], 'empty resource'],
+    [[{ resource: 'reports:admin', level: 'read' }], 'resource delimiter'],
+    [[{ resource: 'reports?', level: 'read' }], 'resource punctuation'],
+    [[{ resource: 'a'.repeat(129), level: 'read' }], 'resource length'],
+    [[{ resource: 'reports', level: 'admin' }], 'scope level'],
+    [undefined, 'non-array scopes'],
+  ])('rejects invalid runtime scope input: %s (%s)', (scopes, _case) => {
+    expect(() => flattenScopes(scopes as never)).toThrow(
+      expect.objectContaining({ code: 'api_key_invalid_input' }),
+    );
+  });
+
+  it('accepts the documented resource boundary and characters', () => {
+    const resource = `A${'a'.repeat(123)}._/-`;
+
+    expect(flattenScopes([{ resource, level: 'write' }])).toEqual([`${resource}:write`]);
+  });
 });
 
 describe('scopeSatisfies', () => {
