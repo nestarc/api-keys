@@ -540,7 +540,7 @@ contract locally with `npm run test:e2e:prisma`; the runner uses `PRISMA_E2E_DAT
 supplied, otherwise it starts a disposable PostgreSQL 16 Docker container.
 
 `npm run test:consumer:strict:legacy` packs the library and verifies exact Nest 10.4.20 with
-Prisma 6.19.3. `npm run test:consumer:strict:modern` verifies exact Nest 11.2.1 with Prisma
+Prisma 6.19.3. `npm run test:consumer:strict:modern` verifies exact Nest 11.2.3 with Prisma
 7.10.0. Both use an independent strict install, assert installed versions and packed peer
 metadata, compile the packed public declarations with `skipLibCheck: false`, and boot a Nest
 application context. They reject inherited npm bypass settings and explicitly keep

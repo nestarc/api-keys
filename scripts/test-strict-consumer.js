@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const projectRoot = path.resolve(__dirname, '..');
-const DEFAULT_NEST_VERSION = '11.2.1';
+const DEFAULT_NEST_VERSION = '11.2.3';
 const DEFAULT_PRISMA_VERSION = '7.10.0';
 const EXPECTED_NEST_PEER = '^10.0.0 || ^11.0.0';
 const EXPECTED_PRISMA_PEER = '^5.0.0 || ^6.0.0 || ^7.0.0';

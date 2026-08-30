@@ -77,6 +77,11 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
   rotate capabilities before exposing the additive safe management methods.
 - `onAuthFailed(prefix, code)` is deprecated in favor of the structured `api_key.auth_failed`
   lifecycle event delivered through `onEvent`; it remains supported for source compatibility.
+- Move the default development and modern-consumer baseline to the compatible NestJS 11.2.3
+  `common`/`core`/`testing` trio while retaining exact NestJS 10.4.20 legacy-consumer coverage.
+- Replace the legacy ESLint configuration with flat config and align ESLint 10.9.1 with
+  typescript-eslint 8.68.0. ESLint's locked engine floor is recorded as input to the separate
+  Node support-policy decision; this change does not alter the package's public Node range.
 
 ## [0.3.2] - 2026-08-30
 

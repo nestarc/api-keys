@@ -119,8 +119,8 @@ M  docs/prisma-peer-compatibility-plan-2026-08-23.md
 
 | 축 | 공개 선언 | 현재 자동 증거 | 남은 결정 |
 | --- | --- | --- | --- |
-| Node | `>=20` | source Node 20/22, publish Node 24 | Node 20 EOL 이후 22/24로 정렬 |
-| NestJS | 10/11 | 전체 suite는 Nest 10, Nest 11은 packed consumer smoke | 두 major의 검증 깊이 정책 |
+| Node | `>=20` | source Node 20/22, publish Node 24; ESLint 10 floor는 20.19/22.13/24 | Node 20 EOL 이후 22/24로 정렬 |
+| NestJS | 10/11 | 전체 suite/dev baseline은 Nest 11.2.3, Nest 10.4.20은 packed strict/HTTP consumer | 두 major의 검증 깊이 정책 |
 | Prisma | 5/6/7 optional | 각 major PostgreSQL contract, 6/7 strict consumers | off-diagonal 조합을 전부 검증할지 정책화 |
 | module format | CommonJS `main/types` | 현재 tarball consumer | ESM/`exports` 도입 여부는 P3 ADR |
 
@@ -134,6 +134,8 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 - v0.3.1 Prisma 5/6 PostgreSQL contract와 strict tarball consumer
 - v0.3.2 Nest 11/Prisma 7 PostgreSQL contract, strict consumer, schema/config examples
 - Prisma 5/6/7 CI/release matrix와 npm trusted publishing/provenance
+- `AK-M08A/B/C`의 Actions/Jest/Prettier/ts-jest 순차 갱신, Nest 11.2.3 dev trio,
+  ESLint 10/typescript-eslint 8 flat-config toolchain
 - tenancy `TEN-M21`은 `DONE`이며 다시 열지 않는다. 역사적 published-only full-flow는 tenancy 0.15.0, API Keys 0.3.2, RBAC 0.2.1, Nest 11.2.1, Prisma 7.10.0 tuple과 legacy lane을 검증했다.
 - 이후 published `@nestarc/tenancy@0.16.0`의 별도 modern lane은 API Keys 0.3.2, RBAC 0.2.1, Outbox 0.2.1, Jobs 0.3.1, Webhook 0.13.1, Nest 11.2.1, Prisma 7.10.0을 registry lock/integrity와 함께 다시 검증했고 legacy/modern 실경로가 각각 3/3 통과했다.
 - 이후 API Keys/RBAC patch의 published-only 재검증은 새 tenancy 외부 작업 `TEN-ECO-NEXT`가 소유한다. `TEN-M21`을 재개하거나 API Keys 작업의 `DONE`을 이 사후 검증에 종속시키지 않는다.
@@ -155,12 +157,12 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 7A | `AK-M07A` | P1 | `DONE` | M | `AK-M01` | credential verification과 Guard authorization telemetry 분리 |
 | 7B | `AK-M07B` | P1 | `DONE` | M | `AK-M01` | Guard 밖 IP allowlist의 request-aware 계약 결정·구현 |
 | 7C | `AK-M14` | P1 | `DONE` | S | `AK-M07A` | legacy `onAuthFailed` observer failure 격리 |
-| 8A | `AK-M08A` | P1 | `READY` | S | 없음 | green dependency PR을 순차 재검증·merge |
-| 8B | `AK-M08B` | P1 | `BLOCKED` | M | `AK-M08A` | Nest trio를 11.2.x default dev baseline으로 이동 |
-| 8C | `AK-M08C` | P1 | `BLOCKED` | M | `AK-M08A` | ESLint 10/typescript-eslint 8 toolchain 정렬 |
-| 9 | `AK-M09` | P1 | `BLOCKED` | M | `AK-M08B`, `AK-M08C` | Node 22/24 지원 계약으로 정렬 |
+| 8A | `AK-M08A` | P1 | `DONE` | S | 없음 | green dependency PR을 순차 재검증·merge |
+| 8B | `AK-M08B` | P1 | `DONE` | M | `AK-M08A` | Nest trio를 11.2.x default dev baseline으로 이동 |
+| 8C | `AK-M08C` | P1 | `DONE` | M | `AK-M08A` | ESLint 10/typescript-eslint 8 toolchain 정렬 |
+| 9 | `AK-M09` | P1 | `READY` | M | `AK-M08B`, `AK-M08C` | Node 22/24 지원 계약으로 정렬 |
 | 10 | `AK-M10` | P1 | `BLOCKED` | L | `AK-M09` | Nest/Prisma/PostgreSQL/no-Prisma compatibility 증거 정책 고정 |
-| 11 | `AK-M11` | P1 | `BLOCKED` | S | `AK-M08A`, `AK-M08C` | coverage floor와 CI evidence |
+| 11 | `AK-M11` | P1 | `READY` | S | `AK-M08A`, `AK-M08C` | coverage floor와 CI evidence |
 | 12 | `AK-M15` | P2 | `DECISION` | S | 없음 | list의 active/expired/grace semantics 정렬 |
 | 13 | `AK-M12` | P2 | `BLOCKED` | M | `AK-M15` | public list DTO에서 verifier material 제거 |
 | 14 | `AK-M13` | P2 | `READY` | S | `AK-M04` | raw key environment와 stored environment bind |
@@ -505,28 +507,57 @@ rejection으로 다시 실패해도 격리해 API key operation이나 process un
 
 #### `AK-M08A` — green PR 순차 처리
 
+- 상태: `P1 / DONE`
+
 - PR #16 Actions, #17 Prettier/ts-jest lock, #20 Jest/@types major를 각각 최신 base에서 재검증한다.
 - lockfile 충돌을 피하려고 #16 → #17 → #20 순으로 처리한다.
 - 각 PR은 lint/test/typecheck/build/bench와 현재 Prisma/consumer matrix를 통과해야 한다.
 
+완료 결정(2026-08-30): PR #16은 기존 base의 5개 Node/Prisma check 성공을 재확인하고
+`306be401`로 squash merge했다. 이어 PR #17을 새 main으로 update-branch해 run
+`33311083763`의 Node 20/22와 Prisma 5/6/7을 모두 통과시킨 뒤 `b3dbf139`로 merge했고,
+PR #20도 다시 update-branch해 run `33311145802`의 같은 5개 check를 모두 통과시킨 뒤
+`f00ce8f2`로 merge했다. 세 merge commit의 main push run도 각각 성공했다. 원격 세 커밋은
+기존 로컬 유지보수 커밋을 보존하는 merge
+`055daa5`로 통합했다. 로컬에서 이후 추가된 HTTP consumer job의 checkout/setup-node도
+Actions v7로 맞춰 #16의 의도를 보존한다.
+
 #### `AK-M08B` — Nest trio default baseline
+
+- 상태: `P1 / DONE`
 
 - 단독 `@nestjs/common` major PR #18은 사용하지 않는다.
 - common/core/testing과 필요한 platform package를 호환되는 Nest 11.2.x 묶음으로 갱신한다.
 - Nest 10 지원은 strict legacy consumer에서 계속 검증한다.
 - 완료 뒤 Nest/file-type 관련 dev advisory를 재평가한다.
 
+완료 결정(2026-08-30): dev baseline을 `@nestjs/common`, `@nestjs/core`,
+`@nestjs/testing`의 호환되는 `~11.2.3` trio로 이동했다. source unit suite에는 HTTP platform이
+필요하지 않아 platform package를 root에 추가하지 않았고, exact HTTP consumer가 각 Nest 10/11
+platform package를 독립 설치한다. exact Nest 10.4.20 legacy와 Nest 11.2.3 modern strict/HTTP
+consumer가 모두 통과했다. Nest 11.2.3이 가져오는 `file-type@21.3.4` 경로를 재확인했으며
+production/full audit 모두 0이다.
+
 #### `AK-M08C` — ESLint 10 toolchain
+
+- 상태: `P1 / DONE`
 
 - 실패 중인 #19/#21의 단독 업데이트를 대체한다.
 - ESLint 10, parser/plugin, flat config의 실제 engine floor를 한 PR에서 정렬하고 그 결과를 `AK-M09`의 public Node 하한 입력으로 넘긴다. public Node 지원 정책 자체는 이 작업에서 결정하지 않는다.
 - lint 의미 변경과 대량 formatting을 분리한다.
 
+완료 결정(2026-08-30): legacy eslintrc/ignore를 `eslint.config.cjs` flat config로 대체하고
+`eslint@10.9.1`, `@eslint/js@10.0.1`, typescript-eslint parser/plugin `8.68.0`,
+`globals@17.11.0`을 하나의 lockfile로 정렬했다. 기존 recommended와 unused-argument ignore
+의미를 유지했으며 source/test 대량 formatting은 하지 않았다. locked ESLint/@eslint/js engine
+floor는 `^20.19.0 || ^22.13.0 || >=24`다. 이는 `AK-M09` 입력이며 공개 `engines.node >=20`은
+이번 작업에서 바꾸지 않았다. bypass/force/override 없이 `npm ci`가 재현되고 전체 audit은 0이다.
+
 공통 금지: `npm audit fix --force`, `--legacy-peer-deps`, `--force`, 근거 없는 permanent override.
 
 ### `AK-M09` — Node 22/24 지원 정책
 
-- 상태: `P1 / BLOCKED (AK-M08B, AK-M08C)`
+- 상태: `P1 / READY`
 - 권장 방향: Node 20 EOL을 제거하고 `engines`, types, CI, release, consumer를 Node 22/24로 맞춘다.
 
 완료 조건:
@@ -557,7 +588,7 @@ rejection으로 다시 실패해도 격리해 API key operation이나 process un
 
 ### `AK-M11` — coverage floor
 
-- 상태: `P1 / BLOCKED (AK-M08A, AK-M08C)`
+- 상태: `P1 / READY`
 
 완료 조건:
 
@@ -649,7 +680,7 @@ rejection으로 다시 실패해도 격리해 API key operation이나 process un
 
 ### `AK-M18` — release ancestry와 pack-once provenance
 
-- 상태: `P2 / BLOCKED (AK-M08A, AK-M09)`
+- 상태: `P2 / BLOCKED (AK-M09)`
 
 완료 조건:
 
@@ -663,7 +694,7 @@ rejection으로 다시 실패해도 격리해 API key operation이나 process un
 
 ### `AK-M19` — workflow와 dependency bot 수렴
 
-- 상태: `P2 / BLOCKED (AK-M08A, AK-M08B, AK-M08C, AK-M18)`
+- 상태: `P2 / BLOCKED (AK-M18)`
 
 완료 조건:
 
@@ -767,7 +798,7 @@ api_keys_coverage_dir="$(mktemp -d /tmp/api-keys-coverage.XXXXXX)"
 
 - Prisma 5.22.0, 6.19.3, 7.10.0 PostgreSQL 16 contract
 - exact Nest 10.4.20/Prisma 6.19.3 strict consumer
-- exact Nest 11.2.1/Prisma 7.10.0 strict consumer
+- exact Nest 11.2.3/Prisma 7.10.0 strict consumer
 - 해당 작업이 지원 matrix를 바꿀 때만 선택한 off-diagonal lane
 
 현재 script는 한 번에 `PRISMA_E2E_RUNTIME_ROOT` 하나만 실행한다. 아래처럼 세 exact runtime을 각각 설치·반복해야 5/6/7 matrix 증거가 된다. `PRISMA_E2E_DATABASE_URL`을 생략하면 runner가 각 실행에 disposable PostgreSQL 16 container를 사용한다.
@@ -847,9 +878,12 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 
 ### 9.1 2026-08-30 실제 자동화
 
-- source CI: PR/main에서 Node 20/22 각각 lint, test, build, bench smoke를 실행한다.
+- source CI: PR/main에서 Node 20/22 각각 lint, test, build, bench smoke를 실행하고 exact
+  Nest 10.4.20/11.2.3 HTTP consumer를 별도 job으로 실행한다.
 - source CI와 tag release의 `verify-prisma`: PostgreSQL 16에서 Prisma 5/6/7 real DB contract를 실행하고 Prisma 6/7 lane은 legacy/modern strict consumer도 실행한다.
-- tag release `publish`: `verify-prisma`만 직접 선행으로 요구하며 Node 24에서 lint, test, build, tag/package version check 후 trusted publish를 실행한다.
+- source/release workflow의 checkout/setup-node는 Actions v7로 통일했다.
+- tag release `publish`: `verify-prisma`와 `verify-http`를 선행으로 요구하며 Node 24에서 lint,
+  test, build, tag/package version check 후 trusted publish를 실행한다.
 - 현재 workflow에는 production audit gate, `git diff --check`, main ancestry, CHANGELOG version check, pack-once identity, coverage threshold가 없다. 이를 이미 강제되는 gate로 기록하지 않는다.
 
 ### 9.2 현재 수동 release checklist
@@ -890,8 +924,9 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
    `.github/workflows/ci.yml`과 `release.yml`에 같은 exact version의 persistent gate를 추가한다.
 4. profile A/B/D와 packed RBAC consumer를 다시 통과시켜 `AK-M06B`를 `DONE` 처리하고,
    tenancy-owned `TEN-ECO-NEXT`에 published package tuple을 인계한다.
-5. `AK-M07A/B`와 `AK-M14`는 완료됐다. 외부 RBAC release를 기다리는 동안 다음 순서의 실행 가능한
-   작업은 `AK-M08A`이며, PR #16/#17/#20의 최신 base/check/diff를 다시 조회한다.
+5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`는 완료됐다. 외부 RBAC release를 기다리는 동안
+   다음 순서의 실행 가능한 작업은 `AK-M09`이며, ESLint 10의 실제 engine floor를 기준으로
+   Node 22 최소 patch와 Node 24 profile A/B/C/D를 먼저 검증한다.
 
 Published RBAC 0.2.1은 `request.apiKeyContext` conflict와 trim/coerce 계약 때문에 의도적으로
 RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증거로 사용하지 않는다.
@@ -912,6 +947,9 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-30 | `AK-M07A` | `DONE` | `f3a1bed` | `f3a1bed + worktree` (PR/release 없음) | 12 suites/184 tests, coverage 87.91/83.02/85.04/87.70, Guard missing/denial telemetry table PASS | `AK-M14` observer isolation RED table |
 | 2026-08-30 | `AK-M07B` | `DONE` | `f3a1bed` | `f3a1bed + worktree` (PR/release 없음) | Nest 10/11 strict direct + HTTP packed consumers, request-aware IP table PASS | AK-M07A/B 변경을 함께 검토·commit |
 | 2026-08-30 | `AK-M14` | `DONE` | `3454cb6` | `3454cb6 + worktree` (PR/release 없음) | 12 suites/188 tests, coverage 88.23/83.17/86.95/87.86, sync/thenable/async observer와 reporter rejection PASS, Nest 10/11 HTTP PASS | AK-M14 파일을 검토·commit한 뒤 `AK-M08A` 최신 PR 상태 재조회 |
+| 2026-08-30 | `AK-M08A` | `DONE` | local `7a75426`, remote `a24fe1d` | PR #16 `306be401`, #17 `b3dbf139`, #20 `f00ce8f2`; local merge `055daa5` | #17/#20 최신 main 재베이스 후 각 Node 20/22와 Prisma 5/6/7 5 checks PASS | Nest 11.2.x trio clean install |
+| 2026-08-30 | `AK-M08B` | `DONE` | `055daa5` | `055daa5 + worktree` (PR/release 없음) | Nest trio 11.2.3, 12 suites/188 tests, exact Nest 10.4.20/11.2.3 strict+HTTP, Prisma 5/6/7 각 20 PASS | AK-M08C와 함께 toolchain 검증 뒤 `AK-M09` |
+| 2026-08-30 | `AK-M08C` | `DONE` | `055daa5` | `055daa5 + worktree` (PR/release 없음) | ESLint 10.9.1 flat config, coverage 88.23/84.10/86.95/87.86, clean npm ci, production/full audit 0 | `AK-M09` Node 22/24 지원 계약 |
 
 ### AK-M01 종료 인계
 
@@ -1273,4 +1311,96 @@ Unverified paths and reason: remote GitHub CI/release는 push 전이라 미실�
 External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
 Next exact action: AK-M14 변경 파일을 검토·commit한 뒤 AK-M08A의 PR #16/#17/#20 base/check/diff를
   다시 조회하고 #16 → #17 → #20 순서의 재베이스 필요성을 판단한다.
+```
+
+### AK-M08A 종료 인계
+
+```text
+Task: AK-M08A
+State: DONE
+Start ref / end ref: local 7a75426, remote a24fe1d / local 055daa5, remote f00ce8f2
+Changed files: remote PR #16 .github/workflows/ci.yml, .github/workflows/release.yml;
+  PR #17 package-lock.json; PR #20 package.json, package-lock.json. Local merge also preserved
+  the previously added HTTP consumer workflow jobs.
+Contract decision: green PR을 #16 → #17 → #20 순서로 처리한다. 각 lockfile PR은 앞선 merge 뒤
+  update-branch하고 동일한 Node 20/22 및 Prisma 5/6/7 check를 새 head에서 다시 통과해야 한다.
+Commands and exact results:
+  PR #16 head a92f4faf, run 33293341075 => 5 checks PASS; squash merge 306be401
+  PUT pulls/17/update-branch => head 77676253, base 306be401
+  gh run watch 33311083763 --exit-status => Node 20/22 + Prisma 5/6/7 PASS
+  PR #17 squash merge => b3dbf139
+  PUT pulls/20/update-branch => head 95ca8f4a, base b3dbf139
+  gh run watch 33311145802 --exit-status => Node 20/22 + Prisma 5/6/7 PASS
+  PR #20 squash merge => f00ce8f2
+  main push runs 33311069629 / 33311139431 / 33311196114 => 모두 success
+  git merge --no-edit origin/main => clean ort merge 055daa5; no conflict
+Unverified paths and reason: 없음. 세 PR 모두 최신 순차 base에서 required source/DB checks를 통과했다.
+External PR/release evidence: https://github.com/nestarc/api-keys/pull/16,
+  https://github.com/nestarc/api-keys/pull/17, https://github.com/nestarc/api-keys/pull/20.
+Next exact action: Nest common/core/testing 11.2.x exact-compatible trio의 clean install을 만든다.
+```
+
+### AK-M08B 종료 인계
+
+```text
+Task: AK-M08B
+State: DONE
+Start ref / end ref: 055daa5 / 055daa5 + session worktree (commit·PR·release 없음)
+Changed files: package.json, package-lock.json, scripts/test-strict-consumer.js,
+  scripts/test-rbac-consumer.js, .github/workflows/ci.yml, .github/workflows/release.yml,
+  README.md, CHANGELOG.md, docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: root dev baseline은 common/core/testing `~11.2.3` trio다. source suite에 필요 없는
+  platform package는 root에 추가하지 않고 exact Nest 10/11 HTTP consumer가 각 platform package를
+  독립 설치한다. Nest 10.4.20은 legacy strict/HTTP lane으로 유지한다.
+Commands and exact results:
+  npm ci => 428 packages clean install, audit 0
+  npm run lint + tsc --noEmit + npm test -- --runInBand => PASS, 12 suites/188 tests
+  npm run test:consumer:strict:legacy => exact Nest 10.4.20/Prisma 6.19.3 PASS
+  npm run test:consumer:strict:modern => exact Nest 11.2.3/Prisma 7.10.0 PASS
+  npm run test:consumer:http:nest10 => exact Nest 10.4.20 default HTTP filter PASS
+  npm run test:consumer:http:nest11 => exact Nest 11.2.3 default HTTP filter PASS
+  Prisma 5.22.0/6.19.3/7.10.0 PostgreSQL 16 => 각 1 suite, 20 tests PASS
+  npm explain file-type => file-type@21.3.4 through @nestjs/common@11.2.3; audit finding 없음
+  npm audit --omit=dev --json + npm audit --json => production/full vulnerabilities 0
+Unverified paths and reason: 변경 head의 remote CI/release는 push 전이라 미실행. local source,
+  packed Nest consumers, real PostgreSQL matrix를 모두 실행했다.
+External PR/release evidence: 없음; 단독 common major PR #18은 사용하지 않았다.
+Next exact action: ESLint 10/parser/plugin/flat config를 하나의 호환 toolchain으로 정렬한다.
+```
+
+### AK-M08C 종료 인계
+
+```text
+Task: AK-M08C
+State: DONE
+Start ref / end ref: 055daa5 / 055daa5 + session worktree (commit·PR·release 없음)
+Changed files: .eslintrc.cjs (removed), .eslintignore (removed), eslint.config.cjs,
+  package.json, package-lock.json, CHANGELOG.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: ESLint 10 flat config가 기존 eslint:recommended,
+  @typescript-eslint/recommended, Node/Jest globals, `_` argument ignore 의미를 보존한다. locked
+  ESLint/@eslint/js Node floor `^20.19.0 || ^22.13.0 || >=24`는 AK-M09 입력으로만 기록하고
+  공개 engines.node는 이 작업에서 바꾸지 않는다.
+Commands and exact results:
+  최초 simultaneous npm install => expected ERESOLVE; 기존 node_modules의 ESLint 8 peer tree와
+    direct @eslint/js 10을 npm 11이 먼저 충돌 판정. force/legacy-peer-deps/override 사용 없음
+  ESLint/parser/plugin 정상 교체 후 direct @eslint/js 고정, npm ci => PASS
+  final root lock metadata 갱신 중 optional WASM peer closure EUSAGE를 발견해 npm install로
+    generated lock entry를 정규화; 최종 npm ci => 428 packages, audit 0, PASS
+  installed: eslint 10.9.1, @eslint/js 10.0.1, parser/plugin 8.68.0, globals 17.11.0
+  npm run lint => PASS; tsc --noEmit => PASS; 12 suites/188 tests PASS
+  fresh Jest coverage (/tmp/api-keys-m08-coverage.M0YW0N) => statements 88.23%,
+    branches 84.10%, functions 86.95%, lines 87.86%
+  npm run build => PASS
+  npm pack --dry-run --json with session cache => PASS, 48 entries,
+    sha512-zajAjYUnGPEpgbMkYRxrLLE9DPKiZWLR5WpTeOf4/ljx/rNrhhx3XHBTlEai+TQQsSm3wrLZSzGu3l9VL9DPUg==
+  npm run bench:smoke => PASS; |unknown-known invalid| p50 0.3µs, bound 500µs
+  profile C exact Prisma and Nest consumer results => AK-M08B 인계와 같이 PASS
+  npm audit --omit=dev --json + npm audit --json => production/full vulnerabilities 0
+  git diff --check => PASS after final documentation update
+Unverified paths and reason: 변경 head의 remote CI/release는 push 전이라 미실행. Node 20 제거와
+  exact Node 22 minimum 검증은 의도적으로 AK-M09가 소유한다.
+External PR/release evidence: 없음; 실패한 단독 PR #19/#21을 현재 worktree의 통합 변경으로 대체했다.
+Next exact action: AK-M09에서 Node 22 최소 patch와 Node 24로 profile A/B/C/D를 실행하고
+  engines/types/CI/release/README 지원 계약을 정렬한다.
 ```

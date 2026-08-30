@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const projectRoot = path.resolve(__dirname, '..');
-const NEST_VERSION = '11.2.1';
+const NEST_VERSION = '11.2.3';
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
