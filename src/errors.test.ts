@@ -1,5 +1,10 @@
 import { HttpException } from '@nestjs/common';
-import { ApiKeyError, ApiKeyErrorCode } from './errors';
+import {
+  ApiKeyError,
+  ApiKeyErrorCode,
+  ApiKeyOperationError,
+  ApiKeyOperationErrorCode,
+} from './errors';
 
 describe('ApiKeyError', () => {
   it('carries a code and http status', () => {
@@ -33,5 +38,17 @@ describe('ApiKeyError', () => {
 
     expect(err.message).toContain('bad prefix');
     expect(JSON.stringify(err.getResponse())).not.toContain('bad prefix');
+  });
+});
+
+describe('ApiKeyOperationError', () => {
+  it('exposes the stable invalid-time code', () => {
+    const err = new ApiKeyOperationError(
+      ApiKeyOperationErrorCode.InvalidTime,
+      'expiresAt must be a valid Date',
+    );
+
+    expect(err).toBeInstanceOf(ApiKeyOperationError);
+    expect(err.code).toBe('api_key_invalid_time');
   });
 });

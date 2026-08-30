@@ -1,8 +1,13 @@
-import { ApiKeyErrorCode } from '../../src/errors';
+import {
+  ApiKeyErrorCode,
+  ApiKeyOperationError,
+  ApiKeyOperationErrorCode,
+} from '../../src/errors';
 import { ApiKeysService } from '../../src/api-keys.service';
 import { Sha256Hasher } from '../../src/hasher';
 import type { ApiKeyStorage } from '../../src/storage/api-key-storage.interface';
 import { InMemoryApiKeyStorage } from '../../src/storage/in-memory-storage';
+import { PrismaApiKeyStorage, type PrismaLike } from '../../src/storage/prisma-storage';
 import type { ApiKeyRecord, ApiKeyVerificationMetric } from '../../src/types';
 
 interface RotatableService extends ApiKeysService {
@@ -28,6 +33,8 @@ function svc(
     onMetricError: (error: unknown, metric: ApiKeyVerificationMetric) => void;
     monotonicClock: () => number;
     emitUsageEvents: boolean;
+    debounceMs: number;
+    storage: ApiKeyStorage;
     ttlPolicy: {
       defaultExpiresInMs?: number;
       maxExpiresInMs?: number;
@@ -35,7 +42,7 @@ function svc(
     };
   }> = {},
 ) {
-  const storage = new InMemoryApiKeyStorage();
+  const storage = overrides.storage ?? new InMemoryApiKeyStorage();
   const hasher =
     overrides.hasher ?? new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 });
   const service = new ApiKeysService({
@@ -47,7 +54,7 @@ function svc(
       return () => `key_${++counter}`;
     })(),
     clock: overrides.clock ?? (() => new Date('2026-01-01T00:00:00Z')),
-    debounceMs: 60_000,
+    debounceMs: overrides.debounceMs ?? 60_000,
     onAuthFailed: overrides.onAuthFailed,
     onEvent: overrides.onEvent,
     onEventError: overrides.onEventError,
@@ -59,6 +66,25 @@ function svc(
   } as ConstructorParameters<typeof ApiKeysService>[0] & Record<string, unknown>);
 
   return { service, storage };
+}
+
+function prismaStorageSpy(): {
+  storage: PrismaApiKeyStorage;
+  create: jest.Mock;
+} {
+  const create = jest.fn().mockResolvedValue(undefined);
+  const prisma = {
+    apiKey: {
+      create,
+      findUnique: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+      update: jest.fn().mockResolvedValue(undefined),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    $transaction: jest.fn(),
+  } as unknown as PrismaLike;
+
+  return { storage: new PrismaApiKeyStorage(prisma), create };
 }
 
 describe('ApiKeysService.create', () => {
@@ -616,6 +642,206 @@ describe('ApiKeysService lifecycle events and TTL policy', () => {
         expiresAt: new Date('2026-01-01T00:01:01Z'),
       }),
     ).rejects.toThrow(/expiration exceeds maximum/);
+  });
+
+  it.each([
+    ['InMemory', () => {
+      const storage = new InMemoryApiKeyStorage();
+      return { storage, mutation: jest.spyOn(storage, 'insert') };
+    }],
+    ['Prisma', () => {
+      const { storage, create } = prismaStorageSpy();
+      return { storage, mutation: create };
+    }],
+  ] as const)(
+    'rejects Invalid Date before %s storage mutation',
+    async (_adapter, createStorage) => {
+      const { storage, mutation } = createStorage();
+      const { service } = svc({ storage });
+
+      await expect(
+        service.create({
+          tenantId: 't1',
+          name: 'invalid expiry',
+          scopes: [{ resource: 'reports', level: 'read' }],
+          expiresAt: new Date(Number.NaN),
+        }),
+      ).rejects.toMatchObject({
+        name: 'ApiKeyOperationError',
+        code: ApiKeyOperationErrorCode.InvalidTime,
+      });
+      expect(mutation).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['debounceMs NaN', { debounceMs: Number.NaN }],
+    ['debounceMs Infinity', { debounceMs: Number.POSITIVE_INFINITY }],
+    ['debounceMs -Infinity', { debounceMs: Number.NEGATIVE_INFINITY }],
+    ['debounceMs negative', { debounceMs: -1 }],
+    ['defaultExpiresInMs NaN', { ttlPolicy: { defaultExpiresInMs: Number.NaN } }],
+    ['defaultExpiresInMs Infinity', { ttlPolicy: { defaultExpiresInMs: Number.POSITIVE_INFINITY } }],
+    [
+      'defaultExpiresInMs -Infinity',
+      { ttlPolicy: { defaultExpiresInMs: Number.NEGATIVE_INFINITY } },
+    ],
+    ['defaultExpiresInMs negative', { ttlPolicy: { defaultExpiresInMs: -1 } }],
+    ['maxExpiresInMs NaN', { ttlPolicy: { maxExpiresInMs: Number.NaN } }],
+    ['maxExpiresInMs Infinity', { ttlPolicy: { maxExpiresInMs: Number.POSITIVE_INFINITY } }],
+    ['maxExpiresInMs -Infinity', { ttlPolicy: { maxExpiresInMs: Number.NEGATIVE_INFINITY } }],
+    ['maxExpiresInMs negative', { ttlPolicy: { maxExpiresInMs: -1 } }],
+  ] as const)('rejects invalid duration configuration: %s', (_label, overrides) => {
+    expect(() => svc(overrides)).toThrow(ApiKeyOperationError);
+
+    try {
+      svc(overrides);
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: ApiKeyOperationErrorCode.InvalidTime,
+      });
+    }
+  });
+
+  it.each([
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['-Infinity', Number.NEGATIVE_INFINITY],
+    ['negative', -1],
+  ])('rejects invalid gracePeriodMs %s before rotation mutation', async (_label, gracePeriodMs) => {
+    const { service, storage } = svc();
+    const created = await service.create({
+      tenantId: 't1',
+      name: 'primary',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+    const rotate = jest.spyOn(storage, 'rotate');
+
+    await expect(service.rotate(created.id, { gracePeriodMs })).rejects.toMatchObject({
+      name: 'ApiKeyOperationError',
+      code: ApiKeyOperationErrorCode.InvalidTime,
+    });
+    expect(rotate).not.toHaveBeenCalled();
+  });
+
+  it('rejects Date arithmetic overflow before create or rotate mutation', async () => {
+    const createdFixture = svc({ ttlPolicy: { defaultExpiresInMs: Number.MAX_VALUE } });
+    const insert = jest.spyOn(createdFixture.storage, 'insert');
+
+    await expect(
+      createdFixture.service.create({
+        tenantId: 't1',
+        name: 'overflow default',
+        scopes: [{ resource: 'reports', level: 'read' }],
+      }),
+    ).rejects.toMatchObject({ code: ApiKeyOperationErrorCode.InvalidTime });
+    expect(insert).not.toHaveBeenCalled();
+
+    const maximumFixture = svc({ ttlPolicy: { maxExpiresInMs: Number.MAX_VALUE } });
+    const maximumInsert = jest.spyOn(maximumFixture.storage, 'insert');
+    await expect(
+      maximumFixture.service.create({
+        tenantId: 't1',
+        name: 'overflow maximum',
+        scopes: [{ resource: 'reports', level: 'read' }],
+        expiresAt: new Date('2026-01-01T00:00:00.000Z'),
+      }),
+    ).rejects.toMatchObject({ code: ApiKeyOperationErrorCode.InvalidTime });
+    expect(maximumInsert).not.toHaveBeenCalled();
+
+    const rotatedFixture = svc();
+    const created = await rotatedFixture.service.create({
+      tenantId: 't1',
+      name: 'overflow grace',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+    const rotate = jest.spyOn(rotatedFixture.storage, 'rotate');
+
+    await expect(
+      rotatedFixture.service.rotate(created.id, { gracePeriodMs: Number.MAX_VALUE }),
+    ).rejects.toMatchObject({ code: ApiKeyOperationErrorCode.InvalidTime });
+    expect(rotate).not.toHaveBeenCalled();
+  });
+
+  it('rejects an Invalid Date rotation expiry before mutation', async () => {
+    const { service, storage } = svc();
+    const created = await service.create({
+      tenantId: 't1',
+      name: 'primary',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+    const rotate = jest.spyOn(storage, 'rotate');
+
+    await expect(
+      service.rotate(created.id, { expiresAt: new Date(Number.NaN) }),
+    ).rejects.toMatchObject({ code: ApiKeyOperationErrorCode.InvalidTime });
+    expect(rotate).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when custom storage returns a corrupt persisted expiry', async () => {
+    const { service, storage } = svc();
+    const created = await service.create({
+      tenantId: 't1',
+      name: 'corrupt persisted expiry',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+    const findByPrefix = storage.findByPrefix.bind(storage);
+    const findById = storage.findById.bind(storage);
+    jest.spyOn(storage, 'findByPrefix').mockImplementation(async (prefix) => {
+      const record = await findByPrefix(prefix);
+      return record ? { ...record, expiresAt: new Date(Number.NaN) } : null;
+    });
+    jest.spyOn(storage, 'findById').mockImplementation(async (id) => {
+      const record = await findById(id);
+      return record ? { ...record, expiresAt: new Date(Number.NaN) } : null;
+    });
+    const touchLastUsed = jest.spyOn(storage, 'touchLastUsed');
+    const rotate = jest.spyOn(storage, 'rotate');
+
+    await expect(service.verify(created.key)).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Invalid,
+    });
+    expect(touchLastUsed).not.toHaveBeenCalled();
+
+    await expect(service.rotate(created.id)).rejects.toMatchObject({
+      code: ApiKeyOperationErrorCode.NotRotatable,
+    });
+    expect(rotate).not.toHaveBeenCalled();
+  });
+
+  it('keeps past expiry, null expiry, and zero grace semantics', async () => {
+    const { service, storage } = svc();
+    const expired = await service.create({
+      tenantId: 't1',
+      name: 'already expired',
+      scopes: [{ resource: 'reports', level: 'read' }],
+      expiresAt: new Date('2025-12-31T23:59:59.999Z'),
+    });
+    await expect(service.verify(expired.key)).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Expired,
+    });
+
+    const nonExpiring = await service.create({
+      tenantId: 't1',
+      name: 'non-expiring',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+    const replacement = await service.rotate(nonExpiring.id, {
+      gracePeriodMs: 0,
+      expiresAt: null,
+    });
+    const records = await storage.listByTenant('t1', { includeRevoked: true });
+    const oldRecord = records.find((record) => record.id === nonExpiring.id);
+    const replacementRecord = records.find((record) => record.id === replacement.id);
+
+    expect(replacement.graceExpiresAt.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+    expect(oldRecord?.expiresAt?.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+    expect(replacementRecord?.expiresAt).toBeNull();
+    await expect(service.verify(nonExpiring.key)).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Expired,
+    });
+    await expect(service.verify(replacement.key)).resolves.toMatchObject({
+      keyId: replacement.id,
+    });
   });
 });
 

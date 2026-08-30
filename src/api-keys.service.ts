@@ -67,21 +67,41 @@ export class ApiKeysService {
     this.namespace = deps.namespace;
     this.idFactory = deps.idFactory ?? (() => randomUUID());
     this.clock = deps.clock ?? (() => new Date());
-    this.debounceMs = deps.debounceMs ?? 60_000;
+    this.debounceMs = validateDuration(deps.debounceMs ?? 60_000, 'debounceMs');
     this.onAuthFailed = deps.onAuthFailed ?? (() => undefined);
     this.onEvent = deps.onEvent;
     this.onEventError = deps.onEventError;
     this.onMetric = deps.onMetric;
     this.onMetricError = deps.onMetricError;
     this.emitUsageEvents = deps.emitUsageEvents ?? false;
-    this.ttlPolicy = deps.ttlPolicy;
+    this.ttlPolicy = deps.ttlPolicy
+      ? {
+          ...deps.ttlPolicy,
+          ...(deps.ttlPolicy.defaultExpiresInMs !== undefined
+            ? {
+                defaultExpiresInMs: validateDuration(
+                  deps.ttlPolicy.defaultExpiresInMs,
+                  'ttlPolicy.defaultExpiresInMs',
+                ),
+              }
+            : {}),
+          ...(deps.ttlPolicy.maxExpiresInMs !== undefined
+            ? {
+                maxExpiresInMs: validateDuration(
+                  deps.ttlPolicy.maxExpiresInMs,
+                  'ttlPolicy.maxExpiresInMs',
+                ),
+              }
+            : {}),
+        }
+      : undefined;
     this.monotonicClock = deps.monotonicClock ?? (() => performance.now());
   }
 
   async create(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
     const environment = input.environment ?? 'live';
     const scopes = flattenScopes(input.scopes);
-    const now = this.clock();
+    const now = this.currentTime();
     const expiresAt = this.resolveExpiresAt(input.expiresAt, now);
     const allowedIpCidrs = normalizeAllowedIpCidrs(input.allowedIpCidrs);
 
@@ -184,9 +204,21 @@ export class ApiKeysService {
         throw new ApiKeyError(ApiKeyErrorCode.Revoked);
       }
 
-      if (record.expiresAt !== null && record.expiresAt.getTime() <= this.clock().getTime()) {
-        this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Expired, record);
-        throw new ApiKeyError(ApiKeyErrorCode.Expired);
+      if (record.expiresAt !== null) {
+        let expiresAtMs: number;
+        let nowMs: number;
+        try {
+          expiresAtMs = dateTimestamp(record.expiresAt, 'persisted expiresAt');
+          nowMs = this.currentTime().getTime();
+        } catch {
+          this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid, record);
+          throw new ApiKeyError(ApiKeyErrorCode.Invalid);
+        }
+
+        if (expiresAtMs <= nowMs) {
+          this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Expired, record);
+          throw new ApiKeyError(ApiKeyErrorCode.Expired);
+        }
       }
 
       // Usage tracking is intentionally best-effort. A concurrent revoke may still win
@@ -227,7 +259,7 @@ export class ApiKeysService {
 
   async revoke(id: string): Promise<void> {
     const record = await this.storage.findById(id);
-    await this.storage.markRevoked(id, this.clock());
+    await this.storage.markRevoked(id, this.currentTime());
     if (record) {
       this.emitEvent({
         type: 'api_key.revoked',
@@ -244,31 +276,50 @@ export class ApiKeysService {
     id: string,
     input: RotateApiKeyInput = {},
   ): Promise<RotateApiKeyResult> {
+    const gracePeriodMs = validateDuration(input.gracePeriodMs ?? 0, 'gracePeriodMs');
+    if (input.expiresAt !== undefined && input.expiresAt !== null) {
+      dateTimestamp(input.expiresAt, 'expiresAt');
+    }
+
     const oldRecord = await this.storage.findById(id);
     if (!oldRecord) {
       throw new ApiKeyOperationError(ApiKeyOperationErrorCode.NotFound);
     }
 
-    const now = this.clock();
+    const now = this.currentTime();
+    let oldExpiresAtMs: number | null = null;
+    if (oldRecord.expiresAt !== null) {
+      try {
+        oldExpiresAtMs = dateTimestamp(oldRecord.expiresAt, 'persisted expiresAt');
+      } catch {
+        throw new ApiKeyOperationError(ApiKeyOperationErrorCode.NotRotatable);
+      }
+    }
     if (
       oldRecord.revokedAt !== null ||
       oldRecord.rotatedAt !== null ||
       oldRecord.replacedByKeyId !== null ||
-      (oldRecord.expiresAt !== null && oldRecord.expiresAt.getTime() <= now.getTime())
+      (oldExpiresAtMs !== null && oldExpiresAtMs <= now.getTime())
     ) {
       throw new ApiKeyOperationError(ApiKeyOperationErrorCode.NotRotatable);
     }
 
-    const requestedGraceExpiresAt = new Date(now.getTime() + (input.gracePeriodMs ?? 0));
+    const requestedGraceExpiresAt = addDuration(now, gracePeriodMs, 'gracePeriodMs');
     const oldExpiresAt =
       oldRecord.expiresAt !== null &&
-      oldRecord.expiresAt.getTime() < requestedGraceExpiresAt.getTime()
+      oldExpiresAtMs !== null &&
+      oldExpiresAtMs < requestedGraceExpiresAt.getTime()
         ? oldRecord.expiresAt
         : requestedGraceExpiresAt;
     const allowedIpCidrs =
       input.allowedIpCidrs === undefined
         ? [...(oldRecord.allowedIpCidrs ?? [])]
         : normalizeAllowedIpCidrs(input.allowedIpCidrs);
+    const replacementExpiresAt = this.resolveExpiresAt(
+      input.expiresAt,
+      now,
+      oldRecord.expiresAt,
+    );
 
     for (let attempt = 0; attempt < ApiKeysService.CREATE_MAX_ATTEMPTS; attempt += 1) {
       const generatedKey = generateKey({
@@ -287,7 +338,7 @@ export class ApiKeysService {
         scopes: [...oldRecord.scopes],
         allowedIpCidrs,
         lastUsedAt: null,
-        expiresAt: this.resolveExpiresAt(input.expiresAt, now, oldRecord.expiresAt),
+        expiresAt: replacementExpiresAt,
         revokedAt: null,
         rotatedAt: null,
         replacedByKeyId: null,
@@ -374,24 +425,46 @@ export class ApiKeysService {
     } else if (fallbackExpiresAt) {
       expiresAt = fallbackExpiresAt;
     } else if (this.ttlPolicy?.defaultExpiresInMs !== undefined) {
-      expiresAt = new Date(now.getTime() + this.ttlPolicy.defaultExpiresInMs);
+      expiresAt = addDuration(
+        now,
+        this.ttlPolicy.defaultExpiresInMs,
+        'ttlPolicy.defaultExpiresInMs',
+      );
     } else {
       expiresAt = null;
     }
 
     if (expiresAt === null && this.ttlPolicy?.allowNeverExpires === false) {
-      throw new Error('expiration is required by ttlPolicy');
+      throw new ApiKeyOperationError(
+        ApiKeyOperationErrorCode.InvalidTime,
+        'expiration is required by ttlPolicy',
+      );
     }
 
-    if (
-      expiresAt !== null &&
-      this.ttlPolicy?.maxExpiresInMs !== undefined &&
-      expiresAt.getTime() > now.getTime() + this.ttlPolicy.maxExpiresInMs
-    ) {
-      throw new Error('expiration exceeds maximum ttlPolicy');
+    if (expiresAt !== null) {
+      const expiresAtMs = dateTimestamp(expiresAt, 'expiresAt');
+      if (this.ttlPolicy?.maxExpiresInMs !== undefined) {
+        const maximumExpiresAt = addDuration(
+          now,
+          this.ttlPolicy.maxExpiresInMs,
+          'ttlPolicy.maxExpiresInMs',
+        );
+        if (expiresAtMs > maximumExpiresAt.getTime()) {
+          throw new ApiKeyOperationError(
+            ApiKeyOperationErrorCode.InvalidTime,
+            'expiration exceeds maximum ttlPolicy',
+          );
+        }
+      }
     }
 
     return expiresAt;
+  }
+
+  private currentTime(): Date {
+    const now = this.clock();
+    dateTimestamp(now, 'clock');
+    return now;
   }
 
   private reportAuthFailed(
@@ -490,6 +563,48 @@ function verificationOutcomeFromError(error: unknown): ApiKeyVerificationOutcome
     default:
       return 'error';
   }
+}
+
+function validateDuration(value: number, label: string): number {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new ApiKeyOperationError(
+      ApiKeyOperationErrorCode.InvalidTime,
+      `${label} must be a finite, non-negative duration`,
+    );
+  }
+
+  return value;
+}
+
+function dateTimestamp(value: Date, label: string): number {
+  if (!(value instanceof Date)) {
+    throw new ApiKeyOperationError(
+      ApiKeyOperationErrorCode.InvalidTime,
+      `${label} must be a valid Date`,
+    );
+  }
+
+  const timestamp = value.getTime();
+  if (!Number.isFinite(timestamp)) {
+    throw new ApiKeyOperationError(
+      ApiKeyOperationErrorCode.InvalidTime,
+      `${label} must be a valid Date`,
+    );
+  }
+
+  return timestamp;
+}
+
+function addDuration(now: Date, durationMs: number, label: string): Date {
+  const result = new Date(dateTimestamp(now, 'clock') + validateDuration(durationMs, label));
+  if (!Number.isFinite(result.getTime())) {
+    throw new ApiKeyOperationError(
+      ApiKeyOperationErrorCode.InvalidTime,
+      `${label} exceeds the supported Date range`,
+    );
+  }
+
+  return result;
 }
 
 function isDuplicatePrefixError(error: unknown): boolean {

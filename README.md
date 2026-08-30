@@ -221,6 +221,23 @@ Legacy adapters returning `Promise<void>` now fail fast instead of being treated
 rotation. This public interface change is intentionally shipped as pre-1.0 minor `0.4.0`, not a
 `0.3.x` patch; custom adapter authors must update before upgrading.
 
+## Expiration and time values
+
+`expiresAt` must be a valid JavaScript `Date`. A past value is accepted and creates a key that is
+immediately expired. A stored `null` means the key does not expire; `rotate({ expiresAt: null })`
+also explicitly makes the replacement non-expiring unless `allowNeverExpires: false` rejects it.
+
+`gracePeriodMs`, `debounceMs`, `defaultExpiresInMs`, and `maxExpiresInMs` must be finite,
+non-negative millisecond durations. A zero grace period is valid and expires the old key at the
+rotation timestamp, while still issuing the replacement. Date arithmetic that exceeds
+JavaScript's supported `Date` range is rejected before storage mutation.
+
+Invalid time input and TTL-policy violations throw `ApiKeyOperationError` with the stable
+`api_key_invalid_time` code. If a custom storage adapter returns a corrupt non-null `expiresAt`,
+verification fails as `api_key_invalid` and rotation fails as `api_key_not_rotatable`; the record
+is never treated as indefinitely valid. Custom adapters should still persist only valid `Date`
+values or `null`.
+
 ## Revoking and listing keys
 
 ```typescript
@@ -342,7 +359,8 @@ Lifecycle details are secret-first: a wrong secret always returns `api_key_inval
 prefix belongs to a revoked or expired record. Only a caller presenting the valid secret can
 receive `api_key_revoked` or `api_key_expired`.
 
-Rotation precondition failures throw `ApiKeyOperationError` with `api_key_record_not_found` or `api_key_not_rotatable`.
+Operation failures throw `ApiKeyOperationError` with `api_key_record_not_found`,
+`api_key_not_rotatable`, or `api_key_invalid_time`.
 
 ## Logging
 

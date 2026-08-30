@@ -44,6 +44,7 @@ export class ApiKeyError extends HttpException {
 export const ApiKeyOperationErrorCode = {
   NotFound: 'api_key_record_not_found',
   NotRotatable: 'api_key_not_rotatable',
+  InvalidTime: 'api_key_invalid_time',
 } as const;
 
 export type ApiKeyOperationErrorCode =

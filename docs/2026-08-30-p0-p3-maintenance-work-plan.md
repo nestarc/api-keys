@@ -146,7 +146,7 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | ---: | --- | --- | --- | --- | --- | --- |
 | 1 | `AK-M01` | P0 | `DONE` | L | 없음 | secret-first lifecycle 판정과 Nest 기본 HTTP 401/403 계약 복구 |
 | 2 | `AK-M02` | P0 | `DONE` | L | 없음 | concurrent rotation을 exactly-once CAS로 변경 |
-| 3 | `AK-M03` | P1 | `READY` | M | 없음 | 시간/TTL/grace 입력과 손상 record fail-closed |
+| 3 | `AK-M03` | P1 | `DONE` | M | 없음 | 시간/TTL/grace 입력과 손상 record fail-closed |
 | 4 | `AK-M04` | P1 | `READY` | M | 없음 | namespace·environment·scope·parser·redaction round-trip 계약 |
 | 5 | `AK-M05` | P1 | `READY` | M | 없음 | observer/contextWriter 경계와 인증 context whole-object 불변성 |
 | 6A | `AK-M06A` | P1 | `READY` | S | 없음 | tenant ID producer canonicalization ADR |
@@ -276,20 +276,28 @@ breaking change이므로 pre-1.0 minor `0.4.0`으로 배포하며 `0.3.x` patch�
 
 ### `AK-M03` — 시간 값 fail-closed validation
 
-- 상태: `P1 / READY`
+- 상태: `P1 / DONE`
 - 범위: `expiresAt`, `gracePeriodMs`, default/max TTL, debounce 및 storage에서 읽은 expiry.
 
 완료 조건:
 
-- [ ] `Invalid Date`, `NaN`, `±Infinity`, 허용하지 않는 음수 duration을 storage mutation 전에 stable error로 거부한다.
-- [ ] 손상된 persisted expiry는 verify/rotate에서 무기한 유효로 해석하지 않고 fail closed한다.
-- [ ] 과거 expiry, `null`, zero grace의 현재 의미를 테스트와 문서로 고정한다.
-- [ ] TTL policy 계산에 overflow가 생기면 거부한다.
-- [ ] valid input의 기존 create/rotate 결과는 유지된다.
+- [x] `Invalid Date`, `NaN`, `±Infinity`, 허용하지 않는 음수 duration을 storage mutation 전에 stable error로 거부한다.
+- [x] 손상된 persisted expiry는 verify/rotate에서 무기한 유효로 해석하지 않고 fail closed한다.
+- [x] 과거 expiry, `null`, zero grace의 현재 의미를 테스트와 문서로 고정한다.
+- [x] TTL policy 계산에 overflow가 생기면 거부한다.
+- [x] valid input의 기존 create/rotate 결과는 유지된다.
 
 검증: 프로필 A/B, service 입력은 InMemory/Prisma-before-mutation spy table, 손상 persisted record는 fake/custom storage fail-closed table, 유효 값만 real PostgreSQL lane. Prisma DateTime으로 표현할 수 없는 `Invalid Date` row를 억지로 seed하지 않는다.
 
 비범위: timezone UI, cron cleanup, 유효한 legacy Date migration.
+
+완료 결정(2026-08-30): public `ApiKeyOperationErrorCode.InvalidTime`을
+`api_key_invalid_time`으로 추가했다. `expiresAt`은 유효한 `Date`, duration 입력은 유한한
+0 이상의 millisecond여야 하며 default/max/grace Date 산술이 JavaScript Date 범위를 넘으면
+storage mutation 전에 같은 code로 거부한다. 과거 expiry는 즉시 만료, persisted/explicit
+replacement `null`은 non-expiring, zero grace는 rotation 시각 즉시 old-key 만료 의미를 유지한다.
+secret이 일치한 뒤 custom storage의 손상된 non-null expiry를 발견하면 verify는
+`api_key_invalid`, rotate는 `api_key_not_rotatable`로 fail closed한다.
 
 ### `AK-M04` — namespace·runtime input·key format·redaction 계약
 
@@ -787,6 +795,7 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 
 - [x] `AK-M01`: wrong-secret lifecycle oracle/hash-work regression과 Nest 10/11 actual HTTP 401/403 E2E
 - [x] `AK-M02`: real PostgreSQL concurrent rotation exactly-once CAS
+- [x] `AK-M03`: invalid time/duration pre-mutation 및 corrupt persisted expiry fail-closed contract
 - [ ] `AK-M04`: runtime environment/scope와 generated key parse/verify/redact property contract
 - [ ] `AK-M05`: observer/contextWriter whole-object mutation negative contract
 - [ ] `AK-M06B`: packed API Keys candidate → published RBAC canonical/conflict consumer
@@ -801,13 +810,13 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 
 ## 10. 다음 세션 권장 시작점
 
-1. 현재 worktree의 `AK-M02` diff를 검토하고 이 변경만 pre-1.0 `0.4.0` 대상 commit/PR로 종료한다.
+1. 현재 worktree의 `AK-M03` diff를 검토하고 이 변경만 별도 P1 commit/PR로 종료한다.
 2. merge 뒤 최신 main에서 새 branch/worktree를 만든다.
-3. 실행 큐상 다음인 `AK-M03`만 선택한다.
-4. `Invalid Date`, `NaN`, `Infinity`, 음수 duration의 storage-before-mutation RED 표를 먼저 만든다.
-5. AK-M02의 atomic rotation contract와 Prisma 5/6/7 lane을 AK-M03에서 변경하지 않고 회귀 gate로 유지한다.
+3. 실행 큐상 다음인 `AK-M04`만 선택한다.
+4. namespace/environment/scope runtime 표와 발급→parse→verify→redact round-trip RED test를 먼저 만든다.
+5. AK-M01~M03의 인증, atomic rotation, 시간값 fail-closed contract와 Prisma 5/6/7 lane을 회귀 gate로 유지한다.
 
-`AK-M02`와 `AK-M03`을 한 PR에 넣지 않는다. dependency/toolchain 변경도 P0/P1 수정과 섞지 않는다.
+`AK-M03`과 `AK-M04`를 한 PR에 넣지 않는다. dependency/toolchain 변경도 P1 수정과 섞지 않는다.
 
 ## 11. 작업 기록
 
@@ -816,6 +825,7 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 | 2026-08-30 | 계획 기준선 | `DONE` | `v0.3.2 / a24fe1d` | 문서 작성 | 11 suites/81 tests, lint/typecheck, fresh coverage, audits, release/CI/source 검토 | `AK-M01` 시작 |
 | 2026-08-30 | `AK-M01` | `DONE` | `408ca80` | `408ca80 + worktree` (PR/release 없음) | profile A 11 suites/85 tests, profile B 84.21/77.61/81.94/83.73, Nest 10.4.20/11.2.1 packed HTTP PASS, benchmark smoke PASS | AK-M01 단독 patch commit/PR 뒤 `AK-M02` 시작 |
 | 2026-08-30 | `AK-M02` | `DONE` | `ea2ebb7` | `ea2ebb7 + worktree` (PR/release 없음) | profile A 11 suites/93 tests, profile B 85.55/80.56/80.82/85.14, Prisma 5/6/7 PostgreSQL 각 18 tests, strict legacy/modern PASS | AK-M02 단독 0.4.0 PR 뒤 `AK-M03` 시작 |
+| 2026-08-30 | `AK-M03` | `DONE` | `c6c343a` | `c6c343a + worktree` (PR/release 없음) | profile A 11 suites/116 tests, profile B 86.82/81.85/83.11/86.49, Prisma 5/6/7 PostgreSQL 각 18 tests, build/audit PASS | AK-M03 단독 P1 PR 뒤 `AK-M04` 시작 |
 
 ### AK-M01 종료 인계
 
@@ -882,4 +892,37 @@ Unverified paths and reason: remote GitHub CI/release jobs은 push 전이라 미
 External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
 Next exact action: AK-M02 파일만 검토·commit해 pre-1.0 0.4.0 대상 단독 PR로 merge한 뒤 AK-M03의
   invalid time/duration storage-before-mutation RED table을 추가한다.
+```
+
+### AK-M03 종료 인계
+
+```text
+Task: AK-M03
+State: DONE
+Start ref / end ref: c6c343a / c6c343a + session worktree (commit·PR·release 없음)
+Changed files: src/api-keys.service.ts, src/errors.ts, src/errors.test.ts,
+  test/integration/api-keys.service.test.ts, README.md, CHANGELOG.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: invalid expiresAt, duration configuration/input, Date arithmetic overflow는
+  storage mutation 전 ApiKeyOperationError/api_key_invalid_time으로 거부한다. 과거 expiry는 즉시
+  expired, null은 non-expiring, zero grace는 old key 즉시 만료다. authenticated record의 손상
+  expiry는 verify api_key_invalid, rotate api_key_not_rotatable로 fail closed한다.
+Commands and exact results:
+  RED: npm test -- --runInBand test/integration/api-keys.service.test.ts
+    => expected FAIL; ApiKeyOperationErrorCode.InvalidTime contract 부재
+  npm run lint => PASS
+  ./node_modules/.bin/tsc --noEmit -p tsconfig.build.json => PASS
+  npm test -- --runInBand => 11 suites, 116 tests PASS
+  fresh Jest coverage (/tmp/api-keys-m03-final-coverage.0Ru4jY) => statements 86.82%,
+    branches 81.85%, functions 83.11%, lines 86.49%
+  Prisma 5.22.0/6.19.3/7.10.0 PostgreSQL 16 => 각 1 suite, 18 tests PASS
+  npm run build => PASS
+  npm audit --omit=dev --json => production vulnerabilities 0
+  git diff --check => PASS
+Unverified paths and reason: remote GitHub CI/release jobs과 strict packed consumers는 push 전이며,
+  AK-M03이 package/peer contract를 바꾸지 않아 미실행. Invalid Date persisted row는 Prisma DateTime으로
+  표현할 수 없어 계획대로 실DB에 seed하지 않고 custom-storage return table로 검증했다.
+External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
+Next exact action: AK-M03 파일만 검토·commit해 별도 P1 PR로 merge한 뒤 AK-M04의 runtime
+  namespace/environment/scope 및 parse/verify/redact round-trip RED table을 추가한다.
 ```

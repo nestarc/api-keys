@@ -21,6 +21,10 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 - Make rotation an exactly-once atomic CAS: concurrent attempts for one old key now produce one
   linked replacement while every loser returns the stable `api_key_not_rotatable` operation error.
   `PrismaApiKeyStorage` uses an interactive transaction with a conditional PostgreSQL update.
+- Validate expiration dates and all TTL, grace, and debounce durations before storage mutation;
+  invalid, non-finite, negative, or overflowing values now fail with the stable
+  `api_key_invalid_time` operation code. Corrupt persisted expirations fail closed during
+  verification and rotation instead of being treated as indefinitely valid.
 
 ### Changed
 
