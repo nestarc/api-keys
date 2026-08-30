@@ -10,6 +10,23 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-30
+
+### Added
+
+- PostgreSQL-backed `PrismaApiKeyStorage` contract coverage with Prisma 7.10.0 and its matching
+  `@prisma/adapter-pg` driver adapter.
+- Tarball-based strict consumer coverage for exact NestJS 11.2.1 and Prisma 7.10.0, including
+  package metadata assertions, `skipLibCheck: false` public declaration compilation, npm bypass
+  configuration rejection, and a Nest application-context runtime smoke test.
+- Packaged Prisma 7 schema and Prisma Config examples alongside the Prisma 5/6 schema example.
+
+### Changed
+
+- Expanded NestJS peers to `^10.0.0 || ^11.0.0` and the optional `@prisma/client` peer to
+  `^5.0.0 || ^6.0.0 || ^7.0.0`, backed by strict consumer and real PostgreSQL evidence.
+- Extended CI and release verification to retain the Prisma 5/6 lanes while adding Prisma 7.
+
 ## [0.3.1] - 2026-08-23
 
 ### Added
