@@ -154,7 +154,7 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 6C | `AK-M06C` | P1 | `DONE` | M | `AK-M02`, `AK-M06A` | tenant-bound revoke/rotate 안전 API 또는 management ownership 결정 |
 | 7A | `AK-M07A` | P1 | `DONE` | M | `AK-M01` | credential verification과 Guard authorization telemetry 분리 |
 | 7B | `AK-M07B` | P1 | `DONE` | M | `AK-M01` | Guard 밖 IP allowlist의 request-aware 계약 결정·구현 |
-| 7C | `AK-M14` | P1 | `READY` | S | `AK-M07A` | legacy `onAuthFailed` observer failure 격리 |
+| 7C | `AK-M14` | P1 | `DONE` | S | `AK-M07A` | legacy `onAuthFailed` observer failure 격리 |
 | 8A | `AK-M08A` | P1 | `READY` | S | 없음 | green dependency PR을 순차 재검증·merge |
 | 8B | `AK-M08B` | P1 | `BLOCKED` | M | `AK-M08A` | Nest trio를 11.2.x default dev baseline으로 이동 |
 | 8C | `AK-M08C` | P1 | `BLOCKED` | M | `AK-M08A` | ESLint 10/typescript-eslint 8 toolchain 정렬 |
@@ -480,16 +480,24 @@ request-aware missing-IP 거절, 허용 IP 성공과 public declaration을 검�
 
 ### `AK-M14` — legacy observer failure isolation
 
-- 상태: `P1 / READY (AK-M07A DONE)`
+- 상태: `P1 / DONE`
 
 완료 조건:
 
-- [ ] `onAuthFailed`의 sync throw/thenable/async reject가 원래 인증 오류를 바꾸지 않는다.
-- [ ] observer 실패 뒤에도 `AK-M07A`가 정한 `auth_failed` event와 verification metric 의미가 유지된다.
-- [ ] reporting callback 자체의 실패도 격리된다.
-- [ ] unhandled rejection이 없고 legacy hook deprecation 여부를 문서화한다.
+- [x] `onAuthFailed`의 sync throw/thenable/async reject가 원래 인증 오류를 바꾸지 않는다.
+- [x] observer 실패 뒤에도 `AK-M07A`가 정한 `auth_failed` event와 verification metric 의미가 유지된다.
+- [x] reporting callback 자체의 실패도 격리된다.
+- [x] unhandled rejection이 없고 legacy hook deprecation 여부를 문서화한다.
 
 검증: sync/async observer table, unhandled rejection check, `AK-M01` HTTP error regression.
+
+완료 결정(2026-08-30): `onAuthFailed(prefix, code)`는 source compatibility를 위해 유지하되
+structured `api_key.auth_failed` lifecycle event로 대체하도록 deprecate한다. 공통 observer 실행
+경계가 sync throw와 표준 Promise뿐 아니라 `PromiseLike` thenable rejection도 즉시 관찰하며,
+legacy hook 실패는 원래 `ApiKeyError`, auth-failed event, verification metric을 바꾸지 않는다.
+event/verification/authorization metric observer의 error-reporting callback이 동기 예외 또는 async
+rejection으로 다시 실패해도 격리해 API key operation이나 process unhandled rejection으로 전파하지
+않는다.
 
 ### `AK-M08A/B/C` — dependency/toolchain 정리
 
@@ -863,6 +871,7 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 - [ ] `AK-M06B`: packed API Keys candidate → published RBAC canonical/conflict consumer
 - [x] `AK-M06C`: tenant-bound revoke update와 rotation CAS의 InMemory/Prisma/packed consumer contract
 - [x] `AK-M07A`: missing/denial telemetry semantics; `AK-M07B`: request-aware IP restriction contract
+- [x] `AK-M14`: legacy auth observer sync/thenable/async rejection과 reporter 재실패 격리
 - [ ] `AK-M09`: selected Node minimum/24 source lanes
 - [ ] `AK-M10`: PostgreSQL 14/16와 no-Prisma packed consumer
 - [ ] `AK-M11`: fresh coverage threshold
@@ -881,9 +890,8 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
    `.github/workflows/ci.yml`과 `release.yml`에 같은 exact version의 persistent gate를 추가한다.
 4. profile A/B/D와 packed RBAC consumer를 다시 통과시켜 `AK-M06B`를 `DONE` 처리하고,
    tenancy-owned `TEN-ECO-NEXT`에 published package tuple을 인계한다.
-5. `AK-M07A/B`는 완료됐다. 외부 RBAC release를 기다리는 동안 다음 순서의 실행 가능한 작업은
-   `AK-M14`이며, observer sync throw/async reject가 원래 인증 오류와 새 telemetry를 바꾸지 않는
-   RED table부터 추가한다.
+5. `AK-M07A/B`와 `AK-M14`는 완료됐다. 외부 RBAC release를 기다리는 동안 다음 순서의 실행 가능한
+   작업은 `AK-M08A`이며, PR #16/#17/#20의 최신 base/check/diff를 다시 조회한다.
 
 Published RBAC 0.2.1은 `request.apiKeyContext` conflict와 trim/coerce 계약 때문에 의도적으로
 RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증거로 사용하지 않는다.
@@ -903,6 +911,7 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-30 | `AK-M06C` | `DONE` | `f3a1bed` | `f3a1bed + worktree` (PR/release 없음) | InMemory + Prisma 5/6/7 각 20 tests, Nest 10/11 packed management runtime PASS | AK-M06C 범위 완료; M06B 외부 prerequisite 또는 AK-M07A 진행 |
 | 2026-08-30 | `AK-M07A` | `DONE` | `f3a1bed` | `f3a1bed + worktree` (PR/release 없음) | 12 suites/184 tests, coverage 87.91/83.02/85.04/87.70, Guard missing/denial telemetry table PASS | `AK-M14` observer isolation RED table |
 | 2026-08-30 | `AK-M07B` | `DONE` | `f3a1bed` | `f3a1bed + worktree` (PR/release 없음) | Nest 10/11 strict direct + HTTP packed consumers, request-aware IP table PASS | AK-M07A/B 변경을 함께 검토·commit |
+| 2026-08-30 | `AK-M14` | `DONE` | `3454cb6` | `3454cb6 + worktree` (PR/release 없음) | 12 suites/188 tests, coverage 88.23/83.17/86.95/87.86, sync/thenable/async observer와 reporter rejection PASS, Nest 10/11 HTTP PASS | AK-M14 파일을 검토·commit한 뒤 `AK-M08A` 최신 PR 상태 재조회 |
 
 ### AK-M01 종료 인계
 
@@ -1229,4 +1238,39 @@ Unverified paths and reason: remote GitHub CI/release는 push 전이라 미실�
   설정은 비범위이며 default resolver는 계속 request.ip만 사용한다.
 External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
 Next exact action: AK-M07A/B 파일을 같은 request-boundary 변경으로 검토·commit한 뒤 AK-M14를 진행한다.
+```
+
+### AK-M14 종료 인계
+
+```text
+Task: AK-M14
+State: DONE
+Start ref / end ref: 3454cb6 / 3454cb6 + session worktree (commit·PR·release 없음)
+Changed files: src/api-keys.service.ts, src/api-keys.module.ts,
+  test/integration/api-keys.service.test.ts, README.md, CHANGELOG.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: legacy onAuthFailed는 source-compatible하게 유지하지만 structured
+  api_key.auth_failed onEvent로 대체하도록 deprecate한다. observer와 error reporter의 동기 예외,
+  Promise/PromiseLike rejection은 원래 인증/telemetry 결과와 process rejection 경계에서 격리한다.
+Commands and exact results:
+  RED: npm test -- --runInBand test/integration/api-keys.service.test.ts
+    => 1 suite, 4 tests FAIL; sync throw가 원래 오류를 대체하고 thenable 미관찰 및 async rejection 발생
+  npm test -- --runInBand test/integration/api-keys.service.test.ts
+    => 1 suite, 89 tests PASS
+  npm run lint => PASS
+  ./node_modules/.bin/tsc --noEmit -p tsconfig.build.json => PASS
+  npm test -- --runInBand => 12 suites, 188 tests PASS
+  fresh Jest coverage (/tmp/api-keys-m14-coverage.YGi5SF) => statements 88.23%,
+    branches 83.17%, functions 86.95%, lines 87.86%
+  npm run build => PASS
+  npm run test:consumer:http:nest10 => exact Nest 10.4.20 default HTTP filter PASS
+  npm run test:consumer:http:nest11 => exact Nest 11.2.1 default HTTP filter PASS
+  git diff --check => PASS
+Unverified paths and reason: remote GitHub CI/release는 push 전이라 미실행. storage/schema/지원
+  matrix를 변경하지 않아 Prisma real DB와 strict Prisma consumers는 재실행하지 않았다. 최초
+  sandbox packed-consumer 실행은 registry network 제한으로 dependency version을 확인하지 못해
+  ERESOLVE했으며 승인된 network 재실행에서 두 exact Nest lane 모두 PASS했다.
+External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
+Next exact action: AK-M14 변경 파일을 검토·commit한 뒤 AK-M08A의 PR #16/#17/#20 base/check/diff를
+  다시 조회하고 #16 → #17 → #20 순서의 재베이스 필요성을 판단한다.
 ```

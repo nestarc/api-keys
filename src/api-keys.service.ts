@@ -53,7 +53,13 @@ export interface ApiKeysServiceDeps {
   idFactory?: () => string;
   clock?: () => Date;
   debounceMs?: number;
-  onAuthFailed?: (prefix: string | null, code: string) => void;
+  /**
+   * @deprecated Use `onEvent` and handle `api_key.auth_failed` events instead.
+   */
+  onAuthFailed?: (
+    prefix: string | null,
+    code: string,
+  ) => void | PromiseLike<void>;
   onEvent?: ApiKeyEventSink;
   onEventError?: (error: unknown, event: ApiKeyEvent) => void;
   onMetric?: ApiKeyMetricSink;
@@ -74,7 +80,10 @@ export class ApiKeysService {
   private readonly idFactory: () => string;
   private readonly clock: () => Date;
   private readonly debounceMs: number;
-  private readonly onAuthFailed: (prefix: string | null, code: string) => void;
+  private readonly onAuthFailed: (
+    prefix: string | null,
+    code: string,
+  ) => void | PromiseLike<void>;
   private readonly onEvent?: ApiKeyEventSink;
   private readonly onEventError?: (error: unknown, event: ApiKeyEvent) => void;
   private readonly onMetric?: ApiKeyMetricSink;
@@ -667,7 +676,7 @@ export class ApiKeysService {
     code: ApiKeyErrorCode,
     record?: ApiKeyRecord,
   ): void {
-    this.onAuthFailed(prefix, code);
+    invokeObserver(() => this.onAuthFailed(prefix, code));
     this.emitEvent({
       type: 'api_key.auth_failed',
       at: this.clock(),
@@ -688,22 +697,17 @@ export class ApiKeysService {
       return;
     }
 
-    try {
-      const result = this.onEvent(copyApiKeyEvent(event));
-      if (result && typeof result === 'object' && 'then' in result) {
-        void result.catch((error: unknown) => this.handleEventError(error, event));
-      }
-    } catch (error) {
-      this.handleEventError(error, event);
-    }
+    invokeObserver(
+      () => this.onEvent?.(copyApiKeyEvent(event)),
+      (error) => this.handleEventError(error, event),
+    );
   }
 
-  private handleEventError(error: unknown, event: ApiKeyEvent): void {
-    try {
-      this.onEventError?.(error, copyApiKeyEvent(event));
-    } catch {
-      // Event failure reporting must not break API key operations.
-    }
+  private handleEventError(
+    error: unknown,
+    event: ApiKeyEvent,
+  ): void | PromiseLike<void> {
+    return this.onEventError?.(error, copyApiKeyEvent(event));
   }
 
   private recordVerificationMetric(
@@ -722,22 +726,17 @@ export class ApiKeysService {
       ...(environment ? { environment } : {}),
     };
 
-    try {
-      const result = this.onMetric(copyApiKeyVerificationMetric(metric));
-      if (result && typeof result === 'object' && 'then' in result) {
-        void result.catch((error: unknown) => this.handleMetricError(error, metric));
-      }
-    } catch (error) {
-      this.handleMetricError(error, metric);
-    }
+    invokeObserver(
+      () => this.onMetric?.(copyApiKeyVerificationMetric(metric)),
+      (error) => this.handleMetricError(error, metric),
+    );
   }
 
-  private handleMetricError(error: unknown, metric: ApiKeyVerificationMetric): void {
-    try {
-      this.onMetricError?.(error, copyApiKeyVerificationMetric(metric));
-    } catch {
-      // Metric failure reporting must not break API key operations.
-    }
+  private handleMetricError(
+    error: unknown,
+    metric: ApiKeyVerificationMetric,
+  ): void | PromiseLike<void> {
+    return this.onMetricError?.(error, copyApiKeyVerificationMetric(metric));
   }
 
   private recordAuthorizationMetric(
@@ -756,30 +755,52 @@ export class ApiKeysService {
       ...(environment ? { environment } : {}),
     };
 
-    try {
-      const result = this.onAuthorizationMetric(copyApiKeyAuthorizationMetric(metric));
-      if (result && typeof result === 'object' && 'then' in result) {
-        void result.catch((error: unknown) =>
-          this.handleAuthorizationMetricError(error, metric),
-        );
-      }
-    } catch (error) {
-      this.handleAuthorizationMetricError(error, metric);
-    }
+    invokeObserver(
+      () => this.onAuthorizationMetric?.(copyApiKeyAuthorizationMetric(metric)),
+      (error) => this.handleAuthorizationMetricError(error, metric),
+    );
   }
 
   private handleAuthorizationMetricError(
     error: unknown,
     metric: ApiKeyAuthorizationMetric,
-  ): void {
-    try {
-      this.onAuthorizationMetricError?.(
-        error,
-        copyApiKeyAuthorizationMetric(metric),
-      );
-    } catch {
-      // Metric failure reporting must not break request authorization.
-    }
+  ): void | PromiseLike<void> {
+    return this.onAuthorizationMetricError?.(
+      error,
+      copyApiKeyAuthorizationMetric(metric),
+    );
+  }
+}
+
+function invokeObserver(
+  observer: () => void | PromiseLike<void>,
+  reportError?: (error: unknown) => void | PromiseLike<void>,
+): void {
+  let result: void | PromiseLike<void>;
+  try {
+    result = observer();
+  } catch (error) {
+    reportObserverError(reportError, error);
+    return;
+  }
+
+  void Promise.resolve(result).catch((error: unknown) => {
+    reportObserverError(reportError, error);
+  });
+}
+
+function reportObserverError(
+  reportError: ((error: unknown) => void | PromiseLike<void>) | undefined,
+  error: unknown,
+): void {
+  if (!reportError) {
+    return;
+  }
+
+  try {
+    void Promise.resolve(reportError(error)).catch(() => undefined);
+  } catch {
+    // Observer failure reporting must not break API key operations.
   }
 }
 

@@ -360,6 +360,13 @@ mutable references with stored records, operation results, verification context,
 callbacks. The public event and metric interfaces remain mutable for source compatibility, so sinks
 may annotate their local payload, but object identity is not a supported contract.
 
+The legacy `onAuthFailed(prefix, code)` hook remains source-compatible but is deprecated; use
+`onEvent` and select `api_key.auth_failed` instead. A synchronous throw, rejecting thenable, or
+async rejection from the legacy hook is isolated: it cannot replace the original `ApiKeyError`,
+suppress the structured auth-failure event, or change the verification metric outcome. Event and
+metric failure-reporting callbacks are isolated as well, including asynchronous rejection, so an
+observer failure cannot create an unhandled rejection through the service.
+
 For tenancy or RLS integration, pass `contextWriter` and write the verified `ApiKeyContext` into
 your own request-local context after scope, environment, and IP checks pass. The writer receives an
 isolated context copy. After it completes, the Guard restores `request.apiKey` from the verified

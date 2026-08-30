@@ -29,6 +29,9 @@ export interface ApiKeysModuleOptions {
   currentPepperVersion?: number;
   debounceMs?: number;
   storage: ApiKeyStorage;
+  /**
+   * @deprecated Use `onEvent` and handle `api_key.auth_failed` events instead.
+   */
   onAuthFailed?: ApiKeysServiceDeps['onAuthFailed'];
   onEvent?: ApiKeyEventSink;
   onEventError?: ApiKeysServiceDeps['onEventError'];

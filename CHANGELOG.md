@@ -49,6 +49,10 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 - Add tenant-bound `revokeForTenant()` and `rotateForTenant()` service methods. The built-in
   adapters bind the expected tenant to the revoke update and atomic rotation CAS; missing and
   cross-tenant IDs share `api_key_record_not_found` and create no replacement credential.
+- Isolate the deprecated `onAuthFailed` hook's synchronous throws, rejecting thenables, and async
+  rejections so they cannot replace the original authentication error or alter auth-failure event
+  and verification metric semantics. Observer error-reporting callbacks are also protected from
+  producing unhandled rejections.
 
 ### Changed
 
@@ -71,6 +75,8 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
   be migrated with their tenancy/RBAC references or have their credentials reissued; values are
   never normalized at runtime. Custom adapters must implement the optional tenant-bound revoke and
   rotate capabilities before exposing the additive safe management methods.
+- `onAuthFailed(prefix, code)` is deprecated in favor of the structured `api_key.auth_failed`
+  lifecycle event delivered through `onEvent`; it remains supported for source compatibility.
 
 ## [0.3.2] - 2026-08-30
 

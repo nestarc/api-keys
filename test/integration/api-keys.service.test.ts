@@ -31,7 +31,7 @@ interface RotatableService extends ApiKeysService {
 function svc(
   overrides: Partial<{
     hasher: Sha256Hasher;
-    onAuthFailed: (prefix: string | null, code: string) => void;
+    onAuthFailed: (prefix: string | null, code: string) => void | PromiseLike<void>;
     clock: () => Date;
     onEvent: (event: ApiKeyEvent) => void | Promise<void>;
     onEventError: (error: unknown, event: ApiKeyEvent) => void;
@@ -1432,6 +1432,98 @@ describe('ApiKeysService request authorization', () => {
 });
 
 describe('ApiKeysService.verify', () => {
+  it.each([
+    [
+      'synchronous throw',
+      () => () => {
+        throw new Error('legacy auth observer failed synchronously');
+      },
+    ],
+    [
+      'rejecting thenable',
+      (onObserved: () => void) => () =>
+        ({
+          then: (_resolve: unknown, reject: (error: unknown) => void) => {
+            onObserved();
+            reject(new Error('legacy auth observer thenable rejected'));
+          },
+        }) as PromiseLike<void>,
+    ],
+    [
+      'asynchronous rejection',
+      () => async () => {
+        throw new Error('legacy auth observer rejected asynchronously');
+      },
+    ],
+  ] as const)(
+    'preserves auth failure telemetry and the original ApiKeyError after %s',
+    async (_caseName, createObserver) => {
+      const events: ApiKeyEvent[] = [];
+      const metrics: ApiKeyVerificationMetric[] = [];
+      const onObserved = jest.fn();
+      const { service } = svc({
+        onAuthFailed: createObserver(onObserved),
+        onEvent: (event) => {
+          events.push(event);
+        },
+        onMetric: (metric) => {
+          metrics.push(metric);
+        },
+      });
+
+      await expect(service.verify('garbage')).rejects.toMatchObject({
+        code: ApiKeyErrorCode.Malformed,
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(events).toEqual([
+        expect.objectContaining({
+          type: 'api_key.auth_failed',
+          code: ApiKeyErrorCode.Malformed,
+        }),
+      ]);
+      expect(metrics).toEqual([
+        expect.objectContaining({
+          type: 'api_key.verification',
+          outcome: 'malformed',
+        }),
+      ]);
+      if (_caseName === 'rejecting thenable') {
+        expect(onObserved).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
+
+  it('isolates failures from auth event and metric failure-reporting callbacks', async () => {
+    const onEventError = jest.fn(async () => {
+      throw new Error('auth event failure reporter rejected');
+    });
+    const onMetricError = jest.fn(async () => {
+      throw new Error('verification metric failure reporter rejected');
+    });
+    const { service } = svc({
+      onAuthFailed: () => {
+        throw new Error('legacy auth observer failed');
+      },
+      onEvent: () => {
+        throw new Error('auth event observer failed');
+      },
+      onEventError,
+      onMetric: () => {
+        throw new Error('verification metric observer failed');
+      },
+      onMetricError,
+    });
+
+    await expect(service.verify('garbage')).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Malformed,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(onEventError).toHaveBeenCalledTimes(1);
+    expect(onMetricError).toHaveBeenCalledTimes(1);
+  });
+
   it('returns context for a valid key', async () => {
     const { service } = svc();
     const { key } = await service.create({
