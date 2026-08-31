@@ -6,22 +6,27 @@ on:
   pull_request:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   coverage:
     name: coverage floor (node 22.13.0)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22.13.0'
           cache: npm
 
       - run: npm ci
+
+      - run: npm run test:audit-policy
+
+      - run: npm run audit:ci
 
       - run: npm run test:release:source
 
@@ -35,7 +40,7 @@ jobs:
 
       - name: Upload coverage summary
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: coverage-summary-node-22.13.0
           path: |
@@ -47,14 +52,15 @@ jobs:
   verify:
     name: verify (node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         node: ['22.13.0', '24']
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -72,10 +78,11 @@ jobs:
   postgres-compatibility:
     name: PostgreSQL 14/16 and Prisma 5/6/7
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22.13.0'
           cache: npm
@@ -87,6 +94,7 @@ jobs:
   packed-consumer:
     name: packed consumer (${{ matrix.name }})
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -98,9 +106,9 @@ jobs:
           - name: Nest 11 / no Prisma
             script: test:consumer:no-prisma
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22.13.0'
           cache: npm
@@ -112,6 +120,7 @@ jobs:
   http-consumer:
     name: http consumer (Nest ${{ matrix.nest }})
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -121,9 +130,9 @@ jobs:
           - nest: '11.2.3'
             script: 'test:consumer:http:nest11'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22.13.0'
           cache: npm

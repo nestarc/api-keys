@@ -6,6 +6,51 @@ function requireMatch(source, pattern, message) {
   assert.match(source, pattern, message);
 }
 
+function jobBodies(workflow) {
+  const jobsStart = workflow.indexOf('\njobs:\n');
+  assert.notEqual(jobsStart, -1, 'workflow jobs block is missing');
+  const jobsSource = workflow.slice(jobsStart + '\njobs:\n'.length);
+  const matches = [...jobsSource.matchAll(/^  ([a-z][a-z0-9-]+):\n/gm)];
+
+  return matches.map((match, index) => ({
+    name: match[1],
+    body: jobsSource.slice(
+      match.index,
+      index + 1 < matches.length ? matches[index + 1].index : undefined,
+    ),
+  }));
+}
+
+function assertWorkflowPolicy(name, workflow) {
+  requireMatch(
+    workflow,
+    /^concurrency:\n  group: [^\n]+\n  cancel-in-progress: (?:true|false)$/m,
+    `${name} concurrency policy is missing`,
+  );
+
+  for (const job of jobBodies(workflow)) {
+    requireMatch(job.body, /^    timeout-minutes: \d+$/m, `${name} ${job.name} timeout is missing`);
+  }
+
+  const actionUses = [
+    ...workflow.matchAll(/uses: (actions\/[a-z-]+)@([^\s#]+)(?:\s+#\s+(v\d+))?/g),
+  ];
+  assert.ok(actionUses.length > 0, `${name} has no first-party Actions references`);
+  for (const [, action, ref, version] of actionUses) {
+    assert.match(ref, /^[0-9a-f]{40}$/, `${name} ${action} must use a full commit SHA`);
+    assert.match(version ?? '', /^v\d+$/, `${name} ${action} must retain a major-version comment`);
+  }
+}
+
+function dependabotGroupBody(source, group) {
+  const marker = `      ${group}:\n`;
+  const start = source.indexOf(marker);
+  assert.notEqual(start, -1, `Dependabot ${group} group is missing`);
+  const remaining = source.slice(start + marker.length);
+  const nextGroup = remaining.search(/^      [a-z][a-z0-9-]+:\n/m);
+  return remaining.slice(0, nextGroup === -1 ? undefined : nextGroup);
+}
+
 function main() {
   const ciWorkflow = fs.readFileSync(
     path.resolve(__dirname, '..', '.github/workflows/ci.yml'),
@@ -15,11 +60,29 @@ function main() {
     path.resolve(__dirname, '..', '.github/workflows/release.yml'),
     'utf8',
   );
+  const dependabot = fs.readFileSync(
+    path.resolve(__dirname, '..', '.github/dependabot.yml'),
+    'utf8',
+  );
+
+  assertWorkflowPolicy('CI', ciWorkflow);
+  assertWorkflowPolicy('release', workflow);
+
+  const actionRefs = new Map();
+  for (const source of [ciWorkflow, workflow]) {
+    for (const [, action, ref] of source.matchAll(/uses: (actions\/[a-z-]+)@([0-9a-f]{40})/g)) {
+      const previous = actionRefs.get(action);
+      assert.ok(!previous || previous === ref, `${action} drifts between CI and release`);
+      actionRefs.set(action, ref);
+    }
+  }
 
   for (const command of [
     'npm run test:release:source',
     'npm run test:release:candidate',
     'npm run test:release:workflow',
+    'npm run test:audit-policy',
+    'npm run audit:ci',
   ]) {
     assert.ok(ciWorkflow.includes(command), `source CI does not persistently run ${command}`);
   }
@@ -38,7 +101,11 @@ function main() {
     /npm run release:prepare-candidate/,
     'release candidate is not packed once',
   );
-  requireMatch(workflow, /uses: actions\/upload-artifact@v7/, 'candidate upload is missing');
+  requireMatch(
+    workflow,
+    /uses: actions\/upload-artifact@[0-9a-f]{40}\s+# v7/,
+    'candidate upload is missing',
+  );
   requireMatch(workflow, /name: release-candidate/, 'candidate artifact name is unstable');
   requireMatch(workflow, /retention-days: 1/, 'candidate retention must be intentionally short');
 
@@ -52,7 +119,7 @@ function main() {
     requireMatch(body, /prepare-release/, `${job} does not depend on the candidate job`);
     requireMatch(
       body,
-      /uses: actions\/download-artifact@v8/,
+      /uses: actions\/download-artifact@[0-9a-f]{40}\s+# v8/,
       `${job} does not download the exact candidate`,
     );
     assert.doesNotMatch(body, /npm pack/, `${job} must not repack the release candidate`);
@@ -78,6 +145,53 @@ function main() {
   );
   requireMatch(workflow, /id-token: write/, 'trusted publishing OIDC permission is missing');
   requireMatch(workflow, /environment: npm/, 'trusted publishing environment is missing');
+  requireMatch(
+    workflow,
+    /npm run audit:ci/,
+    'release does not enforce the dependency audit policy',
+  );
+
+  const compatibilityContract = {
+    name: 'PostgreSQL 14/16 and Prisma 5/6/7',
+    command: 'npm run test:e2e:postgres-matrix',
+  };
+  for (const [name, source] of [
+    ['CI', ciWorkflow],
+    ['release', workflow],
+  ]) {
+    assert.equal(
+      source.split(compatibilityContract.name).length - 1,
+      1,
+      `${name} must expose the exact PostgreSQL/Prisma compatibility job name once`,
+    );
+    assert.equal(
+      source.split(compatibilityContract.command).length - 1,
+      1,
+      `${name} must run the exact PostgreSQL/Prisma compatibility command once`,
+    );
+  }
+
+  const dependencyGroups = {
+    'nest-trio': ['@nestjs/common', '@nestjs/core', '@nestjs/testing'],
+    jest: ['jest', '@types/jest', 'ts-jest'],
+    'eslint-typescript-eslint': ['eslint', '@eslint/js', '@typescript-eslint/*'],
+  };
+  for (const [group, dependencies] of Object.entries(dependencyGroups)) {
+    const body = dependabotGroupBody(dependabot, group);
+    requireMatch(
+      body,
+      /dependency-type: development/,
+      `Dependabot ${group} must be development-only`,
+    );
+    requireMatch(
+      body,
+      /update-types: \['minor', 'patch'\]/,
+      `Dependabot ${group} update types drifted`,
+    );
+    for (const dependency of dependencies) {
+      assert.ok(body.includes(`- '${dependency}'`), `Dependabot ${group} omits ${dependency}`);
+    }
+  }
 
   const packCommands = workflow.match(/npm run release:prepare-candidate/g) ?? [];
   assert.equal(packCommands.length, 1, 'release workflow must prepare exactly one candidate');

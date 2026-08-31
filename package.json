@@ -35,6 +35,8 @@
     "test:release:candidate": "node scripts/test-package-candidate.js",
     "test:release:source": "node scripts/test-release-source.js",
     "test:release:workflow": "node scripts/test-release-workflow.js",
+    "test:audit-policy": "node scripts/test-audit-policy.js",
+    "audit:ci": "node scripts/audit-policy.js",
     "release:prepare-candidate": "node scripts/package-candidate.js create --directory",
     "release:verify-candidate": "node scripts/package-candidate.js verify --directory",
     "release:verify-source": "node scripts/verify-release-source.js",

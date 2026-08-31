@@ -173,7 +173,7 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 16A | `AK-M17A` | P2 | `DONE` | S | 없음 | `SECURITY.md`와 지원 release policy |
 | 16B | `AK-M17B` | P2 | `DONE` | S | `AK-M17A` | GitHub reporting/security/ruleset 설정 |
 | 17 | `AK-M18` | P2 | `DONE` | M | `AK-M08A`, `AK-M09` | release ancestry와 pack-once provenance |
-| 18 | `AK-M19` | P2 | `READY` | M | `AK-M08A`, `AK-M08B`, `AK-M08C`, `AK-M18` | CI/release/Dependabot 구조 정리 |
+| 18 | `AK-M19` | P2 | `DONE` | M | `AK-M08A`, `AK-M08B`, `AK-M08C`, `AK-M18` | CI/release/Dependabot 구조 정리 |
 | 19A | `AK-M20A` | P2 | `READY` | S | `AK-M09`, `AK-M10` | 문서 권위와 현재 지원표 정렬 |
 | 19B | `AK-M20B` | P2 | `READY` | M | `AK-M02` | reusable storage contract의 public package 계약 |
 | 20 | `AK-M21` | P3 | `DECISION` | M | `AK-M10` | `exports`/ESM packaging ADR |
@@ -798,15 +798,36 @@ environment의 `id-token: write`를 유지하므로 trusted publishing과 자동
 
 ### `AK-M19` — workflow와 dependency bot 수렴
 
-- 상태: `P2 / READY (AK-M18 DONE)`
+- 상태: `P2 / DONE`
 
 완료 조건:
 
-- [ ] CI/release Prisma matrix의 drift를 reusable workflow 또는 parity test로 막는다.
-- [ ] Actions version/SHA 정책을 통일한다.
-- [ ] Nest trio, Jest, ESLint/typescript-eslint을 호환 그룹으로 갱신한다.
-- [ ] job timeout과 concurrency가 명시된다.
-- [ ] production audit 0 gate와 만료형 dev-audit exception 방식을 도입한다.
+- [x] CI/release Prisma matrix의 drift를 reusable workflow 또는 parity test로 막는다.
+- [x] Actions version/SHA 정책을 통일한다.
+- [x] Nest trio, Jest, ESLint/typescript-eslint을 호환 그룹으로 갱신한다.
+- [x] job timeout과 concurrency가 명시된다.
+- [x] production audit 0 gate와 만료형 dev-audit exception 방식을 도입한다.
+
+작업 전/목표 workflow graph:
+
+| 관심사 | 작업 전 graph | 목표 및 구현 graph |
+| --- | --- | --- |
+| PostgreSQL/Prisma | CI와 release가 같은 matrix script를 별도로 호출하지만 drift 방지 장치 없음 | 두 workflow에 exact job name `PostgreSQL 14/16 and Prisma 5/6/7`와 exact `npm run test:e2e:postgres-matrix` 호출을 각각 한 번 강제하는 parity fixture |
+| Actions 공급망 | `actions/*@vN` mutable major tag | 조회 시점의 full 40자 commit SHA 고정 + 사람이 읽을 major 주석 + Dependabot `github-actions` 단일 group |
+| 호환 dependency update | 모든 minor/patch dev dependency를 한 PR로 묶음 | `nest-trio`, `jest`, `eslint-typescript-eslint` 세 compatibility group; 나머지는 독립 PR |
+| 실행 상한 | CI만 ref concurrency가 있고 모든 job timeout 및 release concurrency 없음 | PR 번호/branch 단위 CI cancel, tag 단위 release non-cancel concurrency, 모든 CI/release job에 20–45분 timeout |
+| dependency audit | 로컬 수동 snapshot만 존재 | CI coverage와 release prepare가 같은 `audit:ci` gate 실행: production finding은 예외 없이 0, dev finding은 advisory/package/만료일/사유가 일치하는 활성 예외만 허용 |
+
+완료 결정(2026-08-31): reusable workflow 도입으로 ruleset의 기존 status check 이름을 바꾸지
+않고 parity fixture를 선택했다. fixture는 두 workflow의 PostgreSQL/Prisma job name과 command,
+모든 job timeout/concurrency, 모든 `actions/*` full SHA와 CI/release 간 동일 SHA를 검증한다.
+Actions SHA는 `checkout` v7 `3d3c42e...`, `setup-node` v7 `82076278...`,
+`upload-artifact` v7 `043fb46d...`, `download-artifact` v8 `3e5f45b2...`로 고정하고 major
+주석을 유지해 Dependabot이 갱신 가능하게 했다. npm version update는 Nest trio, Jest trio,
+ESLint/typescript-eslint 묶음으로 분리하며 서로 다른 도구군을 한 PR에서 결합하지 않는다.
+`.github/audit-exceptions.json`은 현재 비어 있다. 향후 dev finding을 임시 허용하려면 stable advisory
+ID, package, `YYYY-MM-DD` 만료일, 구체적 사유를 모두 적어야 하고 만료된 예외는 finding 유무와
+관계없이 gate를 실패시킨다. production finding에는 이 예외를 적용하지 않는다.
 
 ### `AK-M20A` — 문서 권위와 지원표
 
@@ -1024,8 +1045,9 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 4. profile A/B/D와 packed RBAC consumer를 다시 통과시켜 `AK-M06B`를 `DONE` 처리하고,
    tenancy-owned `TEN-ECO-NEXT`에 published package tuple을 인계한다.
 5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`, `AK-M11/12/13/15/16`,
-   `AK-M17A/B`, `AK-M18`은 완료됐다. 외부 RBAC release를 기다리는 동안 다음 큐 작업은
-   `AK-M19`의 CI/release/Dependabot 구조 정리다.
+   `AK-M17A/B`, `AK-M18/19`는 완료됐다. 외부 RBAC release를 기다리는 동안 다음 큐 작업은
+   `AK-M20A`의 문서 권위와 현재 지원표 정렬이다. 기존 dirty compatibility 문서는 소유권을
+   보존하고 먼저 수정하지 않는다.
 
 Published RBAC 0.2.1은 `request.apiKeyContext` conflict와 trim/coerce 계약 때문에 의도적으로
 RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증거로 사용하지 않는다.
@@ -1059,6 +1081,7 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-31 | `AK-M17A` | `DONE` | `20940ff` | `20940ff + worktree` (PR/release 없음) | root SECURITY policy resolver, relative link, supported release table, private reporting URL, SECURITY.md Prettier PASS | SECURITY.md 문서 변경을 검토·commit한 뒤 별도 repository settings evidence 확인 |
 | 2026-08-31 | `AK-M17B` | `DONE` | `20940ff` | GitHub repository settings + rulesets `21923571`, `21923576` | private reporting/Dependabot security updates/secret scanning/push protection enabled, active no-bypass main/tag rulesets API 재조회 PASS | `AK-M18` release ancestry와 pack-once provenance 시작 |
 | 2026-08-31 | `AK-M18` | `DONE` | `24bb8bd` | `24bb8bd + worktree` (PR/release 없음) | ancestry/version fixtures, allowlist+tamper fixture, workflow graph/YAML, 48-file exact candidate SHA/SRI, Nest 10/11 strict+HTTP와 no-Prisma consumers, publish dry-run PASS | AK-M18 변경을 검토·commit한 뒤 `AK-M19` workflow/dependency bot 수렴 시작 |
+| 2026-08-31 | `AK-M19` | `DONE` | `9599f5f` | `9599f5f + worktree` (PR/release 없음) | workflow parity/action SHA/timeout/concurrency/audit fixtures, YAML/format, 12 suites/202 tests, coverage, PostgreSQL 14/16·Prisma 5/6/7 각 30, production/full audit 0 PASS | AK-M19 변경을 검토·commit한 뒤 `AK-M20A` 문서 권위/지원표 정렬 시작 |
 
 ### AK-M01 종료 인계
 
@@ -1890,4 +1913,41 @@ External PR/release evidence: 새 PR/release 없음. 기준선 재조회에서 o
   GitHub v0.3.2 published_at 2026-08-30T04:51:24Z, npm latest 0.3.2와 registry integrity를 확인했다.
 Next exact action: AK-M18 파일만 검토·commit한 뒤 AK-M19의 CI/release parity, action policy,
   dependency groups, timeout/concurrency, production audit gate 계약 표를 만든다.
+```
+
+### AK-M19 종료 인계
+
+```text
+Task: AK-M19
+State: DONE
+Start ref / end ref: 9599f5f / 9599f5f + session worktree (commit·PR·release 없음)
+Changed files: .github/workflows/ci.yml, .github/workflows/release.yml,
+  .github/dependabot.yml, .github/audit-exceptions.json, package.json,
+  scripts/audit-policy.js, scripts/test-audit-policy.js, scripts/test-release-workflow.js,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: 기존 required status check 이름을 보존하기 위해 reusable workflow 대신 exact
+  job-name/command parity fixture를 사용한다. 모든 first-party Action은 full commit SHA로 고정하고
+  major 주석과 Dependabot action group으로 갱신 가능성을 유지한다. production audit은 항상 0이며
+  dev audit만 stable advisory/package/expiry/reason이 일치하는 임시 예외를 허용한다.
+Commands and exact results:
+  RED: npm run test:release:workflow => CI coverage timeout is missing
+  RED: npm run test:audit-policy => audit-policy module absent
+  npm run test:release:workflow => workflow parity/action SHA/timeout/concurrency graph PASS
+  npm run test:audit-policy => clean/unapproved/active/expired/production fixtures PASS
+  npm run lint; npm run build => PASS
+  npm test -- --runInBand => 12 suites, 202 tests PASS
+  npm run test:coverage => statements 88.45%, branches 84.16%, functions 87.50%,
+    lines 88.12%; global/critical-file floors PASS
+  npm run test:release:candidate; npm run test:release:source => PASS
+  YAML parse + workflow/JS/JSON/package Prettier check + git diff --check => PASS
+  npm audit --omit=dev --json; npm audit --json => production/full vulnerabilities 0
+  npm run test:e2e:postgres-matrix => PostgreSQL 14/Prisma 5.22.0와 PostgreSQL 16/
+    Prisma 5.22.0, 6.19.3, 7.10.0 각각 30 tests PASS
+Unverified paths and reason: remote GitHub CI/tag workflow는 push 전이라 미실행. sandbox 내부
+  npm run audit:ci의 nested registry 요청은 권한 정책상 차단됐지만 동일 lockfile의 direct
+  production/full audit 0과 audit policy fixtures를 각각 검증했다.
+External PR/release evidence: 새 PR/release 없음. GitHub API에서 Action major ref가 가리키는 exact
+  commit 4개를 조회해 workflow에 고정했다.
+Next exact action: AK-M19 파일만 검토·commit한 뒤 AK-M20A에서 metadata/release와 모순되는 문장
+  목록을 만들되 기존 dirty compatibility 문서는 수정하지 않는다.
 ```

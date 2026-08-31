@@ -8,16 +8,21 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   prepare-release:
     name: verify source and pack release candidate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
           package-manager-cache: false
@@ -26,6 +31,8 @@ jobs:
         run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
 
       - run: npm ci
+
+      - run: npm run audit:ci
 
       - name: Verify tag ancestry and release versions
         run: >-
@@ -44,7 +51,7 @@ jobs:
         run: npm run release:prepare-candidate -- "$RUNNER_TEMP/api-keys-release-candidate"
 
       - name: Upload the exact release candidate
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-candidate
           path: ${{ runner.temp }}/api-keys-release-candidate
@@ -55,10 +62,11 @@ jobs:
   verify-coverage:
     name: coverage floor
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22.13.0'
           package-manager-cache: false
@@ -69,7 +77,7 @@ jobs:
 
       - name: Upload coverage summary
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-coverage-summary
           path: |
@@ -81,6 +89,7 @@ jobs:
   verify-http:
     name: http consumer (Nest ${{ matrix.nest }})
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs: prepare-release
     env:
       API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
@@ -93,16 +102,16 @@ jobs:
           - nest: '11.2.3'
             script: 'test:consumer:http:nest11'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22.13.0'
           package-manager-cache: false
 
       - run: npm ci
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: release-candidate
           path: ${{ runner.temp }}/api-keys-release-candidate
@@ -112,10 +121,11 @@ jobs:
   verify-postgres:
     name: PostgreSQL 14/16 and Prisma 5/6/7
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22.13.0'
           package-manager-cache: false
@@ -127,6 +137,7 @@ jobs:
   verify-packed-consumer:
     name: packed consumer (${{ matrix.name }})
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs: prepare-release
     env:
       API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
@@ -141,16 +152,16 @@ jobs:
           - name: Nest 11 / no Prisma
             script: test:consumer:no-prisma
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22.13.0'
           package-manager-cache: false
 
       - run: npm ci
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: release-candidate
           path: ${{ runner.temp }}/api-keys-release-candidate
@@ -160,15 +171,16 @@ jobs:
   publish:
     name: publish to npm
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [prepare-release, verify-coverage, verify-postgres, verify-packed-consumer, verify-http]
     environment: npm
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
@@ -180,7 +192,7 @@ jobs:
 
       - run: npm test -- --ci
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: release-candidate
           path: ${{ runner.temp }}/api-keys-release-candidate
