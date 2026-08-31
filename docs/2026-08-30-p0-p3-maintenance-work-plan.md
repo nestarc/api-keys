@@ -165,7 +165,7 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 8C | `AK-M08C` | P1 | `DONE` | M | `AK-M08A` | ESLint 10/typescript-eslint 8 toolchain 정렬 |
 | 9 | `AK-M09` | P1 | `DONE` | M | `AK-M08B`, `AK-M08C` | Node 22/24 지원 계약으로 정렬 |
 | 10 | `AK-M10` | P1 | `DONE` | L | `AK-M09` | Nest/Prisma/PostgreSQL/no-Prisma compatibility 증거 정책 고정 |
-| 11 | `AK-M11` | P1 | `READY` | S | `AK-M08A`, `AK-M08C` | coverage floor와 CI evidence |
+| 11 | `AK-M11` | P1 | `DONE` | S | `AK-M08A`, `AK-M08C` | coverage floor와 CI evidence |
 | 12 | `AK-M15` | P2 | `DECISION` | S | 없음 | list의 active/expired/grace semantics 정렬 |
 | 13 | `AK-M12` | P2 | `BLOCKED` | M | `AK-M15` | public list DTO에서 verifier material 제거 |
 | 14 | `AK-M13` | P2 | `READY` | S | `AK-M04` | raw key environment와 stored environment bind |
@@ -610,17 +610,28 @@ strict install, `skipLibCheck: false` typecheck, root import, in-memory create/v
 
 ### `AK-M11` — coverage floor
 
-- 상태: `P1 / READY`
+- 상태: `P1 / DONE`
 
 완료 조건:
 
-- [ ] fresh full run을 기준으로 현실적인 global threshold를 정한다.
-- [ ] Guard, service, errors, key format 같은 critical file은 per-file threshold를 검토한다.
-- [ ] Prisma adapter 0%를 단순 제외해 수치를 부풀리지 않고 real DB gate와 연결한다.
-- [ ] CI artifact에 summary를 남긴다.
-- [ ] 수치 맞추기용 무의미한 테스트는 추가하지 않는다.
+- [x] fresh full run을 기준으로 현실적인 global threshold를 정한다.
+- [x] Guard, service, errors, key format 같은 critical file은 per-file threshold를 검토한다.
+- [x] Prisma adapter 0%를 단순 제외해 수치를 부풀리지 않고 real DB gate와 연결한다.
+- [x] CI artifact에 summary를 남긴다.
+- [x] 수치 맞추기용 무의미한 테스트는 추가하지 않는다.
 
 검증: 프로필 B/C와 의도적 regression이 gate를 실패시키는지 확인.
+
+완료 결정(2026-08-31): fresh 전체 run의 `88.23/84.10/86.95/87.86`을 기준으로 global
+statements/branches/functions/lines floor를 각각 `88/84/86/87`로 고정했다. critical file은 Guard
+`100/83/100/100`, service `93/89/100/93`, errors `100/100/100/100`, key format
+`97/92/100/97`을 같은 JSON summary에서 별도 검증한다. Jest의 path threshold가 해당 파일을
+global 집계에서 빼는 의미를 피하기 위해 Jest 자체는 진짜 전체 global floor를, 후속 checker는
+critical file floor를 담당한다. `prisma-storage.ts`는 collect 대상에 그대로 남겨 fresh run에서
+`6.06/0/7.69/6.06`으로 집계되며, 기능 증거는 별도 필수 PostgreSQL 14/16 + Prisma 5/6/7 real DB
+job이 담당한다. source CI와 tag release는 `coverage-summary.json`과 사람이 읽는
+`coverage-floor.txt`를 14일 artifact로 보존하며 release publish는 coverage job 성공을 요구한다.
+coverage 수치를 올리기 위한 제품 무관 테스트는 추가하지 않았다.
 
 ## 5. P2 작업 명세
 
@@ -811,7 +822,7 @@ git diff --check
 
 ```bash
 api_keys_coverage_dir="$(mktemp -d /tmp/api-keys-coverage.XXXXXX)"
-./node_modules/.bin/jest --runInBand --coverage --coverageDirectory="$api_keys_coverage_dir"
+npm run test:coverage -- --coverageDirectory="$api_keys_coverage_dir"
 ```
 
 출력에 기록된 session-owned 경로만 증거로 사용한다. ignored `coverage/`의 오래된 결과나 다른 세션과 공유한 고정 `/tmp` 경로를 기준으로 삼지 않는다.
@@ -896,7 +907,10 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 - source/release workflow의 checkout/setup-node는 Actions v7로 통일했다.
 - tag release `publish`: `verify-prisma`와 `verify-http`를 선행으로 요구하며 Node 24에서 lint,
   test, build, tag/package version check 후 trusted publish를 실행한다.
-- 현재 workflow에는 production audit gate, `git diff --check`, main ancestry, CHANGELOG version check, pack-once identity, coverage threshold가 없다. 이를 이미 강제되는 gate로 기록하지 않는다.
+- source CI와 tag release의 exact Node 22.13.0 coverage job은 global/critical-file floor를 강제하고
+  JSON/text summary artifact를 14일 보존한다. release `publish`는 이 job도 선행으로 요구한다.
+- 현재 workflow에는 production audit gate, `git diff --check`, main ancestry, CHANGELOG version check,
+  pack-once identity가 없다. 이를 이미 강제되는 gate로 기록하지 않는다.
 
 ### 9.2 현재 수동 release checklist
 
@@ -920,7 +934,7 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 - [x] `AK-M14`: legacy auth observer sync/thenable/async rejection과 reporter 재실패 격리
 - [x] `AK-M09`: exact Node 22.13.0 minimum/Node 24 source lanes와 minimum DB/consumer gates
 - [x] `AK-M10`: PostgreSQL 14/16와 no-Prisma packed consumer
-- [ ] `AK-M11`: fresh coverage threshold
+- [x] `AK-M11`: fresh coverage threshold
 - [ ] `AK-M18`: main ancestry와 consumer-verified exact tarball identity
 - [ ] `AK-M20B`: public storage contract 또는 corrected documentation packed test
 
@@ -936,8 +950,8 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
    `.github/workflows/ci.yml`과 `release.yml`에 같은 exact version의 persistent gate를 추가한다.
 4. profile A/B/D와 packed RBAC consumer를 다시 통과시켜 `AK-M06B`를 `DONE` 처리하고,
    tenancy-owned `TEN-ECO-NEXT`에 published package tuple을 인계한다.
-5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`은 완료됐다. 외부 RBAC
-   release를 기다리는 동안 다음 순서의 실행 가능한 작업은 `AK-M11` coverage floor다.
+5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`, `AK-M11`은 완료됐다. 외부
+   RBAC release를 기다리는 동안 다음 순서의 실행 가능한 작업은 `AK-M15` list 상태 의미 결정이다.
 
 Published RBAC 0.2.1은 `request.apiKeyContext` conflict와 trim/coerce 계약 때문에 의도적으로
 RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증거로 사용하지 않는다.
@@ -963,6 +977,7 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-30 | `AK-M08C` | `DONE` | `055daa5` | `055daa5 + worktree` (PR/release 없음) | ESLint 10.9.1 flat config, coverage 88.23/84.10/86.95/87.86, clean npm ci, production/full audit 0 | `AK-M09` Node 22/24 지원 계약 |
 | 2026-08-30 | `AK-M09` | `DONE` | `fa4093f` | `fa4093f + worktree` (PR/release 없음) | exact Node 22.13.0/24.11.1 A/B/C/D, 각 12 suites/188 tests와 coverage 88.23/84.10/86.95/87.86, Prisma 5/6/7 각 20, Nest 10/11 strict+HTTP, audits 0 | `AK-M10` compatibility 증거 정책 |
 | 2026-08-30 | `AK-M10` | `DONE` | `2488896` | `2488896 + worktree` (PR/release 없음) | PostgreSQL 14/Prisma 5와 PostgreSQL 16/Prisma 5/6/7 각 20 PASS, no-Prisma strict packed consumer, Nest 10/11 strict+HTTP, profile A/D PASS | `AK-M11` coverage floor |
+| 2026-08-31 | `AK-M11` | `DONE` | `7e1dd16` | `7e1dd16 + worktree` (PR/release 없음) | global 88/84/86/87와 4 critical-file floor PASS, 두 intentional regression exit 1, PostgreSQL/Prisma matrix와 packed consumers PASS | `AK-M15` list 상태 의미 결정 |
 
 ### AK-M01 종료 인계
 
@@ -1502,4 +1517,40 @@ Unverified paths and reason: 변경 head의 remote GitHub CI/release는 push 전
 External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
 Next exact action: AK-M11에서 fresh coverage와 real DB adapter gate 책임을 분리하고 threshold를
   제안한 뒤 의도적 regression이 CI gate를 실패시키는지 검증한다.
+```
+
+### AK-M11 종료 인계
+
+```text
+Task: AK-M11
+State: DONE
+Start ref / end ref: 7e1dd16 / 7e1dd16 + session worktree (commit·PR·release 없음)
+Changed files: coverage-thresholds.json, jest.config.ts, scripts/check-coverage.js,
+  scripts/test-coverage.js, package.json, .github/workflows/ci.yml,
+  .github/workflows/release.yml, docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: Jest는 prisma-storage.ts를 제외하지 않은 fresh 전체 global
+  statements/branches/functions/lines 88/84/86/87 floor를 강제한다. 동일 run의 JSON summary에서
+  Guard 100/83/100/100, service 93/89/100/93, errors 100/100/100/100, key format
+  97/92/100/97을 별도 checker가 강제한다. Prisma adapter 기능 증거는 이 수치를 부풀리는
+  unit 제외가 아니라 별도 필수 PostgreSQL 14/16 + Prisma 5/6/7 real DB job이 담당한다.
+Commands and exact results:
+  npm run test:coverage -- --coverageDirectory=/tmp/api-keys-m11-coverage.PbZCYF =>
+    12 suites/188 tests PASS; global 88.23/84.10/86.95/87.86와 4 critical-file floor PASS;
+    prisma-storage.ts 6.06/0/7.69/6.06으로 포함
+  modified JSON summary의 service lines 92.99 < 93 => checker expected exit 1
+  temporary Jest global statements 100 > 88.23 => Jest expected exit 1
+  npm run lint + tsc --noEmit + npm test -- --runInBand + npm run build => PASS,
+    12 suites/188 tests PASS
+  npm run test:e2e:postgres-matrix => PostgreSQL 14/Prisma 5.22.0 및 PostgreSQL 16/
+    Prisma 5.22.0, 6.19.3, 7.10.0 각각 1 suite/20 tests PASS
+  npm run test:consumer:strict:legacy + strict:modern + no-prisma => exact Nest 10.4.20/
+    Prisma 6.19.3, Nest 11.2.3/Prisma 7.10.0, Nest 11.2.3/no-Prisma 모두 PASS
+  npm run test:consumer:http:nest10 + nest11 => default HTTP contract 각각 PASS
+  node --check on coverage scripts, Prettier check, CI/release YAML parse, git diff --check => PASS
+Unverified paths and reason: 변경 head의 remote GitHub CI/release와 실제 artifact upload는 push 전이라
+  미실행했다. 로컬에서 workflow와 동일한 coverage/DB/consumer commands와 artifact 입력 파일 생성을
+  검증했다. ignored test/e2e/generated/prisma-client는 matrix가 exact Prisma 7.10.0으로 마지막 생성했다.
+External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
+Next exact action: AK-M15에서 expired/rotated/revoked key의 현재 default list 결과표를 만들고
+  active/expired/grace 제품 계약을 결정한다.
 ```

@@ -21,6 +21,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "jest",
+    "test:coverage": "node scripts/test-coverage.js",
     "test:watch": "jest --watch",
     "test:e2e:prisma": "node scripts/test-prisma-e2e.js",
     "test:e2e:postgres-matrix": "node scripts/test-postgres-matrix.js",

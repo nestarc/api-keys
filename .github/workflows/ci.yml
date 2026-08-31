@@ -10,6 +10,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  coverage:
+    name: coverage floor (node 22.13.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.13.0'
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run test:coverage
+
+      - name: Upload coverage summary
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-summary-node-22.13.0
+          path: |
+            coverage/coverage-summary.json
+            coverage/coverage-floor.txt
+          if-no-files-found: warn
+          retention-days: 14
+
   verify:
     name: verify (node ${{ matrix.node }})
     runs-on: ubuntu-latest
