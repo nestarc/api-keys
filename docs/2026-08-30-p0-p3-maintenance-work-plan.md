@@ -174,8 +174,8 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 16B | `AK-M17B` | P2 | `DONE` | S | `AK-M17A` | GitHub reporting/security/ruleset 설정 |
 | 17 | `AK-M18` | P2 | `DONE` | M | `AK-M08A`, `AK-M09` | release ancestry와 pack-once provenance |
 | 18 | `AK-M19` | P2 | `DONE` | M | `AK-M08A`, `AK-M08B`, `AK-M08C`, `AK-M18` | CI/release/Dependabot 구조 정리 |
-| 19A | `AK-M20A` | P2 | `READY` | S | `AK-M09`, `AK-M10` | 문서 권위와 현재 지원표 정렬 |
-| 19B | `AK-M20B` | P2 | `READY` | M | `AK-M02` | reusable storage contract의 public package 계약 |
+| 19A | `AK-M20A` | P2 | `DONE` | S | `AK-M09`, `AK-M10` | 문서 권위와 현재 지원표 정렬 |
+| 19B | `AK-M20B` | P2 | `DONE` | M | `AK-M02` | reusable storage contract의 public package 계약 |
 | 20 | `AK-M21` | P3 | `DECISION` | M | `AK-M10` | `exports`/ESM packaging ADR |
 | 21 | `AK-M22` | P3 | `READY` | S | `AK-M02` | collision retry terminal error 계약 |
 | 22 | `AK-M23` | P3 | `READY` | S | `AK-M10` | Nest 12 stable strict-consumer 호환성 스파이크 |
@@ -831,30 +831,47 @@ ID, package, `YYYY-MM-DD` 만료일, 구체적 사유를 모두 적어야 하고
 
 ### `AK-M20A` — 문서 권위와 지원표
 
-- 상태: `P2 / READY (AK-M09, AK-M10 DONE)`
+- 상태: `P2 / DONE`
 
 완료 조건:
 
-- [ ] README에 Node/Nest/Prisma/PostgreSQL 지원표와 검증 깊이를 둔다.
-- [ ] Prisma는 adapter 사용 시에만 필요한 optional peer임을 PRD와 맞춘다.
-- [ ] v0.1–v0.3 spec/implementation plans에 historical/completed 표식을 둔다.
-- [ ] 기존 dirty compatibility 문서는 소유권 확인 뒤 실제 0.3.2 배포 상태로 갱신한다.
-- [ ] 이 유지보수 계획을 canonical execution queue로 링크한다.
+- [x] README에 Node/Nest/Prisma/PostgreSQL 지원표와 검증 깊이를 둔다.
+- [x] Prisma는 adapter 사용 시에만 필요한 optional peer임을 PRD와 맞춘다.
+- [x] v0.1–v0.3 spec/implementation plans에 historical/completed 표식을 둔다.
+- [x] 기존 dirty compatibility 문서는 소유권 확인 뒤 실제 0.3.2 배포 상태로 갱신한다.
+- [x] 이 유지보수 계획을 canonical execution queue로 링크한다.
+
+완료 결정(2026-08-31): 작업 시작 시 compatibility plan은 clean 상태여서 기존 사용자 수정의
+소유권 충돌이 없음을 확인한 뒤 갱신했다. README의 지원표와 evidence policy를 current authority로,
+이 문서를 유일한 실행 큐로 명시했다. PRD의 required Prisma/Node 20+ 문구는 optional Prisma와
+Node `^22.13.0 || ^24.0.0`으로 정정했다. v0.1–v0.3 spec과 두 implementation plan의 unchecked
+step은 historical/completed release 기록이며 backlog가 아니라고 표시했다. compatibility plan의
+`0.3.2 candidate/publish pending`은 실제 GitHub Release/npm latest와 published-only TEN-M21 완료
+증거로 바꿨다.
 
 ### `AK-M20B` — reusable storage contract public package 계약
 
-- 상태: `P2 / READY (AK-M02 DONE)`
+- 상태: `P2 / DONE`
 - 문제: README/CHANGELOG는 custom `ApiKeyStorage` implementor용 reusable contract suite를 약속하지만 현재 suite는 `test/contract/storage-contract.ts`에만 있고 tarball files/root exports에 없다.
 
 완료 조건:
 
-- [ ] runtime package가 지원 가능한 test helper/fixture를 export할지, 문구를 내부 contract로 정정할지 ADR로 결정한다.
-- [ ] export하면 `AK-M02`의 atomic rotation capability와 모든 required method를 검증하고 consumer test framework/Jest global을 암묵적으로 요구하지 않는다.
-- [ ] packed clean consumer가 public 경로로 contract를 import·compile·대표 adapter에 실행한다.
-- [ ] export하지 않으면 README/CHANGELOG/spec에서 external implementor promise를 정확히 좁히고 custom adapter verification recipe를 제공한다.
-- [ ] package files/type declarations와 documentation이 같은 결정을 반영한다.
+- [x] runtime package가 지원 가능한 test helper/fixture를 export할지, 문구를 내부 contract로 정정할지 ADR로 결정한다.
+- [x] export하면 `AK-M02`의 atomic rotation capability와 모든 required method를 검증하고 consumer test framework/Jest global을 암묵적으로 요구하지 않는다.
+- [x] packed clean consumer가 public 경로로 contract를 import·compile·대표 adapter에 실행한다.
+- [x] export하지 않으면 README/CHANGELOG/spec에서 external implementor promise를 정확히 좁히고 custom adapter verification recipe를 제공한다. (export 결정으로 비적용)
+- [x] package files/type declarations와 documentation이 같은 결정을 반영한다.
 
 검증: actual tarball allowlist, no-Prisma custom adapter consumer, public declaration compile.
+
+완료 결정(2026-08-31): external implementor promise를 유지하고 runtime root에서
+`runApiKeyStorageContract()`, `ApiKeyStorageContractError`와 options/result type을 공개한다. runner는
+Node assertion만 사용하며 test framework global과 Prisma를 요구하지 않는다. 모든 required method,
+list 순서/filter, array/Date defensive copy, terminal rotation 상태, 동시 rotation exactly-once를
+검증하고 구현된 tenant-bound capability도 추가 검증한다. 50-file tarball allowlist는 runner JS와
+declaration을 필수로 확인한다. no-Prisma clean consumer는 독립 custom adapter를 strict compile하고
+9개 check를 실행하며 CI/release packed-consumer matrix가 같은 command를 지속 실행한다. 결정 근거는
+[`2026-08-31-public-storage-contract-adr.md`](./2026-08-31-public-storage-contract-adr.md)에 기록했다.
 
 ## 6. P3와 결정 대기 backlog
 
@@ -1030,7 +1047,7 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 - [x] `AK-M11`: fresh coverage threshold
 - [x] `AK-M12`: serialized public summary와 packed declaration/runtime verifier-material exclusion
 - [x] `AK-M18`: main ancestry와 consumer-verified exact tarball identity
-- [ ] `AK-M20B`: public storage contract 또는 corrected documentation packed test
+- [x] `AK-M20B`: public storage contract 또는 corrected documentation packed test
 
 `TEN-ECO-NEXT`의 published-only evidence는 tenancy-owned external gate다. API Keys release에서는 `AK-M06B`의 packed pre-publish consumer를 지속 gate로 유지해 순환을 만들지 않는다. 향후 gate를 완료 전 P0 patch의 선행 조건으로 소급 적용하지 않는다.
 
@@ -1045,9 +1062,8 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 4. profile A/B/D와 packed RBAC consumer를 다시 통과시켜 `AK-M06B`를 `DONE` 처리하고,
    tenancy-owned `TEN-ECO-NEXT`에 published package tuple을 인계한다.
 5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`, `AK-M11/12/13/15/16`,
-   `AK-M17A/B`, `AK-M18/19`는 완료됐다. 외부 RBAC release를 기다리는 동안 다음 큐 작업은
-   `AK-M20A`의 문서 권위와 현재 지원표 정렬이다. 기존 dirty compatibility 문서는 소유권을
-   보존하고 먼저 수정하지 않는다.
+   `AK-M17A/B`, `AK-M18/19`, `AK-M20A/B`는 완료됐다. 외부 RBAC release를 기다리는 동안 다음
+   큐 작업은 `AK-M21`의 public deep import/CJS/ESM 조사와 packaging ADR이다.
 
 Published RBAC 0.2.1은 `request.apiKeyContext` conflict와 trim/coerce 계약 때문에 의도적으로
 RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증거로 사용하지 않는다.
@@ -1082,6 +1098,8 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-31 | `AK-M17B` | `DONE` | `20940ff` | GitHub repository settings + rulesets `21923571`, `21923576` | private reporting/Dependabot security updates/secret scanning/push protection enabled, active no-bypass main/tag rulesets API 재조회 PASS | `AK-M18` release ancestry와 pack-once provenance 시작 |
 | 2026-08-31 | `AK-M18` | `DONE` | `24bb8bd` | `24bb8bd + worktree` (PR/release 없음) | ancestry/version fixtures, allowlist+tamper fixture, workflow graph/YAML, 48-file exact candidate SHA/SRI, Nest 10/11 strict+HTTP와 no-Prisma consumers, publish dry-run PASS | AK-M18 변경을 검토·commit한 뒤 `AK-M19` workflow/dependency bot 수렴 시작 |
 | 2026-08-31 | `AK-M19` | `DONE` | `9599f5f` | `9599f5f + worktree` (PR/release 없음) | workflow parity/action SHA/timeout/concurrency/audit fixtures, YAML/format, 12 suites/202 tests, coverage, PostgreSQL 14/16·Prisma 5/6/7 각 30, production/full audit 0 PASS | AK-M19 변경을 검토·commit한 뒤 `AK-M20A` 문서 권위/지원표 정렬 시작 |
+| 2026-08-31 | `AK-M20A` | `DONE` | `5ff983d` | `5ff983d + worktree` (PR/release 없음) | README support evidence, PRD optional Prisma/Node contract, v0.1–v0.3 historical markers, v0.3.2 release/npm metadata 재조회, 문서 format/link PASS | `AK-M20B` public storage contract 구현 |
+| 2026-08-31 | `AK-M20B` | `DONE` | `5ff983d` | `5ff983d + worktree` (PR/release 없음) | RED missing root export, public runner 9 checks, packed no-Prisma custom adapter compile/runtime, 13 suites/208 tests, coverage 90.46/84.42/89.79/90.18, 50-file allowlist PASS | AK-M20A/B 변경 검토·commit 뒤 `AK-M21` packaging ADR |
 
 ### AK-M01 종료 인계
 
@@ -1950,4 +1968,68 @@ External PR/release evidence: 새 PR/release 없음. GitHub API에서 Action maj
   commit 4개를 조회해 workflow에 고정했다.
 Next exact action: AK-M19 파일만 검토·commit한 뒤 AK-M20A에서 metadata/release와 모순되는 문장
   목록을 만들되 기존 dirty compatibility 문서는 수정하지 않는다.
+```
+
+### AK-M20A 종료 인계
+
+```text
+Task: AK-M20A
+State: DONE
+Start ref / end ref: 5ff983d / 5ff983d + session worktree (commit·PR·release 없음)
+Changed files: README.md, docs/prd.md, docs/spec.md, docs/spec-0.2.md, docs/spec-0.3.md,
+  docs/superpowers/plans/2026-04-14-api-keys-v0.1.md,
+  docs/superpowers/plans/2026-06-18-api-keys-v0.2.md,
+  docs/prisma-peer-compatibility-plan-2026-08-23.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: README와 compatibility evidence policy가 current support authority이고 이
+  maintenance plan만 active execution queue다. versioned PRD/spec/implementation plan은
+  historical/completed 기록이다. Prisma는 adapter 사용 시에만 필요한 optional peer이며 current
+  Node 계약은 ^22.13.0 || ^24.0.0이다.
+Commands and exact results:
+  git fetch --prune --tags; git/gh/npm baseline query => origin/main f00ce8f, annotated v0.3.2
+    commit a24fe1d, GitHub Release published 2026-08-30T04:51:24Z, npm latest 0.3.2 and gitHead
+    a24fe1d, optional Prisma 5/6/7 metadata PASS
+  Prettier formatting and git diff --check => PASS
+Unverified paths and reason: 문서 외부 링크의 HTTP availability는 내용 계약과 무관해 별도 crawler를
+  실행하지 않았다. remote CI는 push 전이라 미실행이다.
+External PR/release evidence: 새 PR/release 없음. 기존 GitHub v0.3.2와 npm 0.3.2를 재조회했다.
+Next exact action: AK-M20B public storage contract를 tarball root에서 제공하고 clean consumer로
+  검증한다.
+```
+
+### AK-M20B 종료 인계
+
+```text
+Task: AK-M20B
+State: DONE
+Start ref / end ref: 5ff983d / 5ff983d + session worktree (commit·PR·release 없음)
+Changed files: src/storage/storage-contract.ts, src/storage/storage-contract.test.ts, src/index.ts,
+  scripts/test-storage-contract-consumer.js, scripts/package-candidate.js,
+  scripts/test-package-candidate.js, scripts/test-release-workflow.js, package.json,
+  .github/workflows/ci.yml, .github/workflows/release.yml, README.md, CHANGELOG.md,
+  docs/2026-08-31-public-storage-contract-adr.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: external adapter promise를 유지한다. framework-independent
+  runApiKeyStorageContract()는 required method, deterministic list, defensive copy, terminal
+  rotation, concurrent exactly-once CAS를 검증하고 존재하는 tenant-bound capability도 검증한다.
+  Node assertion만 사용하며 Jest/Prisma는 요구하지 않는다.
+Commands and exact results:
+  RED: npm run test:consumer:storage-contract => packed declaration에
+    runApiKeyStorageContract export 없음(TS2305)
+  npm run test:consumer:storage-contract => public runner 9 checks, strict declaration compile,
+    no-Prisma independent custom adapter runtime PASS
+  npm run test:release:workflow => CI/release persistent command parity PASS
+  npm run test:release:candidate => required runner JS/declaration allowlist and byte identity PASS
+  npm run lint; npm run build => PASS
+  npm test -- --runInBand => 13 suites, 208 tests PASS
+  npm run test:coverage => statements 90.46%, branches 84.42%, functions 89.79%, lines 90.18%,
+    global/critical-file floors PASS; storage-contract.ts statements/functions/lines 100%,
+    branches 87.87%
+  npm pack --dry-run --ignore-scripts --json => 50 files; runner JS/declaration present PASS
+  git diff --check => PASS
+Unverified paths and reason: 기존 storage implementation과 DB query를 변경하지 않아
+  PostgreSQL/Prisma 5/6/7 matrix는 재실행하지 않았다. remote CI/tag release는 push 전이라 미실행이다.
+External PR/release evidence: 새 PR/release 없음.
+Next exact action: AK-M20A/B 변경만 검토·commit한 뒤 AK-M21에서 public deep import 사용과
+  CJS/ESM consumer를 조사해 packaging ADR을 작성한다.
 ```

@@ -169,6 +169,11 @@ function main() {
       1,
       `${name} must run the exact PostgreSQL/Prisma compatibility command once`,
     );
+    assert.equal(
+      source.split('test:consumer:storage-contract').length - 1,
+      1,
+      `${name} must run the public storage contract packed consumer once`,
+    );
   }
 
   const dependencyGroups = {

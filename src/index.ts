@@ -32,3 +32,8 @@ export type {
 export { InMemoryApiKeyStorage } from './storage/in-memory-storage';
 export { PrismaApiKeyStorage } from './storage/prisma-storage';
 export type { PrismaLike } from './storage/prisma-storage';
+export { ApiKeyStorageContractError, runApiKeyStorageContract } from './storage/storage-contract';
+export type {
+  ApiKeyStorageContractOptions,
+  ApiKeyStorageContractResult,
+} from './storage/storage-contract';

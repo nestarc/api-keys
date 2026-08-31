@@ -1,5 +1,10 @@
 # @nestarc/api-keys — PRD
 
+> [!NOTE]
+> 상태: `HISTORICAL / COMPLETED (v0.1–v0.3)`. 이 문서는 출시된 제품 요구사항의 배경을
+> 기록한다. 현재 지원 범위와 설치 계약은 [README](../README.md), 미완료 작업의 유일한 실행
+> 큐는 [P0–P3 유지보수 계획](./2026-08-30-p0-p3-maintenance-work-plan.md)을 기준으로 한다.
+
 ## 1. 문제 정의
 
 B2B SaaS 백엔드에서 고객이 "서버에서 여러분 API를 호출하려면 뭘 써야 하나요?"라고 물었을 때, 답을 직접 만들어야 한다. 이 과정에서 반복적으로 발생하는 문제:
@@ -32,6 +37,7 @@ nestarc의 기존 축(`tenancy`, `audit-log`, `rbac`)과 자연스럽게 결합�
 ## 5. 범위
 
 ### 포함 (v0.1)
+
 - 키 발급, 검증, 폐기, 만료
 - SHA-256 + pepper 해싱
 - Stripe 스타일 포맷: `nk_{env}_{prefix}_{secret}`
@@ -39,9 +45,10 @@ nestarc의 기존 축(`tenancy`, `audit-log`, `rbac`)과 자연스럽게 결합�
 - test/live 환경 분리 (prefix + 컬럼)
 - NestJS Guard + `@RequireScope` 데코레이터
 - 사용 추적: `lastUsedAt` debounced 업데이트
-- Prisma/in-memory storage adapter와 storage contract test
+- Prisma/in-memory storage adapter와 public storage contract runner
 
 ### 포함 (v0.2)
+
 - 무중단 키 회전: replacement key 발급 + grace period
 - lifecycle event hook: 생성/회전/폐기/인증실패, opt-in 사용 이벤트
 - 안정적인 request context contract: `ApiKeyContext.prefix`, `@CurrentApiKey()`, `getApiKeyContext()`
@@ -50,6 +57,7 @@ nestarc의 기존 축(`tenancy`, `audit-log`, `rbac`)과 자연스럽게 결합�
 - v0.1 문서와 테스트 정렬
 
 ### 포함 (v0.3)
+
 - 키별 IPv4/IPv6/CIDR allowlist와 주입 가능한 client IP resolver
 - 저카디널리티 API key 검증 메트릭 hook
 - `@nestarc/rbac` API key subject 연동 문서와 호환성 테스트
@@ -57,6 +65,7 @@ nestarc의 기존 축(`tenancy`, `audit-log`, `rbac`)과 자연스럽게 결합�
 - verification benchmark 복구와 CI smoke 검증
 
 ### 제외
+
 - OAuth, JWT 세션, end-user 로그인 (Clerk/Auth0/better-auth 영역)
 - 관리 UI (headless 유지)
 - 엔드포인트별 rate limiting (후속 `@nestarc/quotas` 담당)
@@ -65,31 +74,35 @@ nestarc의 기존 축(`tenancy`, `audit-log`, `rbac`)과 자연스럽게 결합�
 
 ## 6. 경쟁/비교
 
-| 항목 | Stripe RAK | Unkey | Clerk | 자체구현 | @nestarc/api-keys |
-|---|---|---|---|---|---|
-| 셀프호스트 | ✗ | 부분 | ✗ | ✓ | ✓ |
-| Prisma 통합 | — | ✗ | ✗ | 수동 | ✓ |
-| Multi-tenant 네이티브 | — | ✗ | 제한적 | 수동 | ✓ (context + hook) |
-| Scope 모델 | ✓ | ✓ | ✗ | 수동 | ✓ (Stripe 호환) |
-| Test/Live 분리 | ✓ | ✓ | ✗ | 수동 | ✓ |
-| Audit 통합 | ✓ | ✓ | 부분 | 수동 | ✓ (event hook) |
+| 항목                  | Stripe RAK | Unkey | Clerk  | 자체구현 | @nestarc/api-keys  |
+| --------------------- | ---------- | ----- | ------ | -------- | ------------------ |
+| 셀프호스트            | ✗          | 부분  | ✗      | ✓        | ✓                  |
+| Prisma 통합           | —          | ✗     | ✗      | 수동     | ✓                  |
+| Multi-tenant 네이티브 | —          | ✗     | 제한적 | 수동     | ✓ (context + hook) |
+| Scope 모델            | ✓          | ✓     | ✗      | 수동     | ✓ (Stripe 호환)    |
+| Test/Live 분리        | ✓          | ✓     | ✗      | 수동     | ✓                  |
+| Audit 통합            | ✓          | ✓     | 부분   | 수동     | ✓ (event hook)     |
 
 ## 7. 비기능 요건
 
 - **보안**: 평문 로깅 금지(logger redact 규칙 제공), 상수시간 비교, 실패 응답 시간 일정화
 - **가용성**: 내장 verification cache가 없으므로 폐기와 회전은 storage 조회 경로에 즉시 반영된다
 - **관찰성**: 생성/회전/폐기/인증실패 이벤트 publish, 사용 이벤트는 opt-in
-- **테스트 가능성**: storage contract suite와 in-memory adapter로 integration test를 구성한다
+- **테스트 가능성**: framework-independent public storage contract runner와 in-memory adapter로
+  integration test를 구성한다
 
 ## 8. 의존성과 연결
 
-- 필수: `@prisma/client`, `@nestjs/common`
-- 선택: `@nestarc/tenancy` (권장), `@nestarc/audit-log` (권장), `@nestarc/rbac` (권장)
-- 런타임: Node 20+, PostgreSQL 14+
+- 필수 peer: `@nestjs/common`, `@nestjs/core`, `reflect-metadata`, `rxjs`
+- adapter 선택 peer: `@prisma/client` (Prisma adapter를 사용할 때만 필요하며 in-memory/custom
+  adapter 소비자는 설치하지 않아도 됨)
+- 선택 통합: `@nestarc/tenancy` (권장), `@nestarc/audit-log` (권장), `@nestarc/rbac` (권장)
+- 런타임: Node `^22.13.0 || ^24.0.0`; PostgreSQL 14+는 Prisma adapter 사용 시 지원
 
 ## 9. 로드맵
 
 **v0.1** (MVP, 2~3주)
+
 - 모듈/서비스/Guard
 - Prisma 스키마 + 마이그레이션 가이드
 - SHA-256 해싱
@@ -98,6 +111,7 @@ nestarc의 기존 축(`tenancy`, `audit-log`, `rbac`)과 자연스럽게 결합�
 - README + quickstart
 
 **v0.2**
+
 - 키 회전 (grace period)
 - lifecycle event hook
 - stable request context helper/decorator
@@ -105,6 +119,7 @@ nestarc의 기존 축(`tenancy`, `audit-log`, `rbac`)과 자연스럽게 결합�
 - tenancy/audit-log bridge recipe를 위한 `contextWriter`
 
 **v0.3**
+
 - IP allowlist per key
 - 저카디널리티 verification metrics hook
 - `@nestarc/rbac` integration contract와 recipe
@@ -112,14 +127,15 @@ nestarc의 기존 축(`tenancy`, `audit-log`, `rbac`)과 자연스럽게 결합�
 - benchmark/CI 정렬
 
 **후속 검토**
+
 - Redis verification cache는 분산 invalidation contract 확정 후 검토
 - argon2는 지원 Node baseline과 hash-algorithm migration 필요성이 생길 때 재검토
 
 ## 10. 리스크와 대응
 
-| 리스크 | 대응 |
-|---|---|
-| SHA-256 + pepper 유출 시 오프라인 공격 | 128비트 이상 랜덤 secret과 pepper rotation을 유지하고 hashing algorithm 변경은 별도 위협 모델로 검토 |
-| 사용자가 평문 키를 로깅 | logger redact 미들웨어 제공, README 명시 |
-| Scope 모델과 RBAC permission의 의미가 혼동 | API key scope와 `@nestarc/rbac` role binding을 독립된 authorization layer로 문서화 |
-| test/live 혼용 사고 | 키 검증 시 환경 불일치를 별도 에러 코드로 노출 |
+| 리스크                                     | 대응                                                                                                 |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| SHA-256 + pepper 유출 시 오프라인 공격     | 128비트 이상 랜덤 secret과 pepper rotation을 유지하고 hashing algorithm 변경은 별도 위협 모델로 검토 |
+| 사용자가 평문 키를 로깅                    | logger redact 미들웨어 제공, README 명시                                                             |
+| Scope 모델과 RBAC permission의 의미가 혼동 | API key scope와 `@nestarc/rbac` role binding을 독립된 authorization layer로 문서화                   |
+| test/live 혼용 사고                        | 키 검증 시 환경 불일치를 별도 에러 코드로 노출                                                       |

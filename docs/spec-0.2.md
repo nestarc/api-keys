@@ -1,5 +1,10 @@
 # @nestarc/api-keys — v0.2 Technical Spec
 
+> [!NOTE]
+> 상태: `HISTORICAL / COMPLETED (v0.2)`. 이 문서의 Must/Should 항목은 출시 기록이며 새
+> backlog가 아니다. 현재 계약은 [README](../README.md), 미완료 작업은
+> [canonical 유지보수 큐](./2026-08-30-p0-p3-maintenance-work-plan.md)를 기준으로 한다.
+
 본 문서는 0.2.0에서 실제 개발할 범위를 고정한다. 목표는 0.1.0의
 MVP를 유지하면서 API key lifecycle, 감사 가능성, nestarc 통합 표면을
 운영 가능한 수준으로 올리는 것이다.
@@ -320,7 +325,7 @@ export interface ApiKeyContext {
 Guard success attaches context to:
 
 ```ts
-request[API_KEY_CONTEXT_PROPERTY] // default property name: "apiKey"
+request[API_KEY_CONTEXT_PROPERTY]; // default property name: "apiKey"
 ```
 
 This property name is a stable public contract for 0.2.x.
@@ -328,8 +333,8 @@ This property name is a stable public contract for 0.2.x.
 ### Decorator and Helper
 
 ```ts
-export const CurrentApiKey = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext) => getApiKeyContext(ctx.switchToHttp().getRequest()),
+export const CurrentApiKey = createParamDecorator((_data: unknown, ctx: ExecutionContext) =>
+  getApiKeyContext(ctx.switchToHttp().getRequest()),
 );
 
 export function getApiKeyContext(request: unknown): ApiKeyContext | undefined;
@@ -340,10 +345,7 @@ export function getApiKeyContext(request: unknown): ApiKeyContext | undefined;
 ### Integration Hook
 
 ```ts
-export type ApiKeyContextWriter = (
-  apiKey: ApiKeyContext,
-  request: unknown,
-) => void | Promise<void>;
+export type ApiKeyContextWriter = (apiKey: ApiKeyContext, request: unknown) => void | Promise<void>;
 
 export interface ApiKeysModuleOptions {
   contextWriter?: ApiKeyContextWriter;

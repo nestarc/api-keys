@@ -31,6 +31,7 @@
     "test:consumer:http:nest10": "node scripts/test-http-consumer.js --nest 10.4.20",
     "test:consumer:http:nest11": "node scripts/test-http-consumer.js --nest 11.2.3",
     "test:consumer:no-prisma": "node scripts/test-no-prisma-consumer.js",
+    "test:consumer:storage-contract": "node scripts/test-storage-contract-consumer.js",
     "test:consumer:rbac": "node scripts/test-rbac-consumer.js",
     "test:release:candidate": "node scripts/test-package-candidate.js",
     "test:release:source": "node scripts/test-release-source.js",

@@ -19,7 +19,7 @@ Secure, tenant-scoped API keys for NestJS + Prisma. SHA-256 hashed, Stripe-style
 - **TTL policy** — optional default expiration, maximum expiration, and no-never-expires enforcement.
 - **Per-key IP allowlists** — exact IPv4/IPv6 addresses and CIDR ranges with fail-closed enforcement.
 - **Verification and authorization metrics** — separate low-cardinality credential and request-policy measurements.
-- **Pluggable storage** — ships with Prisma and in-memory adapters plus a reusable contract suite.
+- **Pluggable storage** — ships with Prisma and in-memory adapters plus a public, framework-independent contract runner.
 - **NestJS-native** — `ApiKeysModule.forRoot`, `ApiKeysGuard`, `@RequireScope`, `@RequireEnvironment`.
 - **Typed errors** — `ApiKeyError` with stable `code` values mapped to HTTP statuses.
 
@@ -40,19 +40,24 @@ declares support for `^5.0.0 || ^6.0.0 || ^7.0.0`. Consumers that use the in-mem
 a custom storage adapter do not need to install Prisma. Prisma 7 consumers must also satisfy
 Prisma's Node.js requirement and configure the driver adapter for their database.
 
-| Supported boundary | Persistent evidence |
-| --- | --- |
-| NestJS 10 | Exact 10.4.20 packed strict install/typecheck/runtime and default HTTP Guard pipeline |
-| NestJS 11 | Full source suite plus exact 11.2.3 packed strict and HTTP consumers |
-| Prisma 5/6/7 | Exact 5.22.0, 6.19.3, and 7.10.0 generated-client storage contracts on PostgreSQL 16 |
-| PostgreSQL 14+ | Prisma 5.22.0 storage contract on PostgreSQL 14; all Prisma majors on PostgreSQL 16 |
-| Prisma omitted | Independent NestJS 11.2.3 packed root consumer with no Prisma install or lock entry |
+| Supported boundary | Persistent evidence                                                                   |
+| ------------------ | ------------------------------------------------------------------------------------- |
+| NestJS 10          | Exact 10.4.20 packed strict install/typecheck/runtime and default HTTP Guard pipeline |
+| NestJS 11          | Full source suite plus exact 11.2.3 packed strict and HTTP consumers                  |
+| Prisma 5/6/7       | Exact 5.22.0, 6.19.3, and 7.10.0 generated-client storage contracts on PostgreSQL 16  |
+| PostgreSQL 14+     | Prisma 5.22.0 storage contract on PostgreSQL 14; all Prisma majors on PostgreSQL 16   |
+| Prisma omitted     | Independent NestJS 11.2.3 packed root consumer with no Prisma install or lock entry   |
 
 The project tests integration boundaries rather than every NestJS/Prisma/PostgreSQL Cartesian
 combination. The legacy NestJS 10 + Prisma 6 and modern NestJS 11 + Prisma 7 packed lanes are the
 representative diagonals; Prisma storage is independently tested against a real database. See the
 [compatibility evidence policy](docs/2026-08-30-compatibility-evidence-policy.md) for lane ownership,
 off-diagonal criteria, and the exact reproducible commands.
+
+Maintenance work is prioritized in the
+[canonical P0–P3 execution queue](docs/2026-08-30-p0-p3-maintenance-work-plan.md). Versioned PRDs,
+technical specs, and implementation plans describe completed historical releases and are not a
+second backlog.
 
 ## Quickstart
 
@@ -318,6 +323,35 @@ capabilities. Built-in adapters include `expectedTenantId` in the revoke update 
 A custom adapter that does not implement the matching capability fails fast when the additive
 service method is called; the service never falls back to a separate tenant check followed by an
 ID-only mutation.
+
+### Verify a custom storage adapter
+
+The package root exports a framework-independent contract runner for custom adapters. Run it
+against disposable test data before publishing or upgrading an adapter:
+
+```typescript
+import { runApiKeyStorageContract } from '@nestarc/api-keys';
+
+await runApiKeyStorageContract({
+  name: 'AcmePostgresApiKeyStorage',
+  createStorage: async () => {
+    await resetContractDatabase();
+    return new AcmePostgresApiKeyStorage(testDatabase);
+  },
+  disposeStorage: async () => {
+    await resetContractDatabase();
+    await testDatabase.close();
+  },
+});
+```
+
+`runApiKeyStorageContract()` verifies every required `ApiKeyStorage` method, deterministic listing,
+defensive `Date`/array boundaries, terminal rotation states, and exactly-once concurrent rotation.
+When `revokeForTenant()` or `rotateForTenant()` is present, it verifies those capabilities too. The
+runner uses Node assertions, does not install Prisma, and does not require Jest, Vitest, Mocha, or
+their globals. It throws `ApiKeyStorageContractError` on the first failed check and returns the list
+of completed checks on success. The runner inserts uniquely named fixtures; use an isolated database
+and remove those fixtures in `disposeStorage`.
 
 ## Expiration and time values
 

@@ -15,6 +15,8 @@ function main() {
     assert.equal(verified.sha256, created.sha256);
     assert.equal(verified.integrity, created.integrity);
     assert.ok(verified.files.includes('dist/index.js'));
+    assert.ok(verified.files.includes('dist/storage/storage-contract.d.ts'));
+    assert.ok(verified.files.includes('dist/storage/storage-contract.js'));
     assert.ok(verified.files.includes('prisma/schema.example.v7.prisma'));
     assert.ok(verified.files.every((file) => !file.startsWith('src/')));
     assert.ok(verified.files.every((file) => !file.startsWith('test/')));

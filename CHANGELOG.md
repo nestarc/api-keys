@@ -12,6 +12,10 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ### Added
 
+- Export the framework-independent `runApiKeyStorageContract()` runner and
+  `ApiKeyStorageContractError` from the package root. A strict packed no-Prisma consumer compiles
+  and executes the contract against an external adapter without Jest or other test globals,
+  including the atomic exactly-once rotation requirement.
 - Add a reproducible PostgreSQL 14/16 compatibility command that installs exact isolated Prisma
   5.22.0, 6.19.3, and 7.10.0 runtimes, plus an independent packed root consumer proving that the
   in-memory/custom-storage path installs, typechecks, and runs without `@prisma/client`.

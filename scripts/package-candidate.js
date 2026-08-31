@@ -11,6 +11,8 @@ const REQUIRED_FILES = [
   'README.md',
   'dist/index.d.ts',
   'dist/index.js',
+  'dist/storage/storage-contract.d.ts',
+  'dist/storage/storage-contract.js',
   'package.json',
   'prisma/prisma.config.example.ts',
   'prisma/schema.example.prisma',

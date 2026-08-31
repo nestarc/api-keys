@@ -105,6 +105,8 @@ jobs:
             script: test:consumer:strict:modern
           - name: Nest 11 / no Prisma
             script: test:consumer:no-prisma
+          - name: Custom storage contract
+            script: test:consumer:storage-contract
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

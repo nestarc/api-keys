@@ -2,9 +2,14 @@
 
 - 작성일: 2026-08-23 (Asia/Seoul)
 - 기준 패키지: `@nestarc/api-keys@0.3.0`
-- 대상 릴리스: `@nestarc/api-keys@0.3.1`
+- 대상 릴리스: `@nestarc/api-keys@0.3.1`, 후속 `@nestarc/api-keys@0.3.2`
 - 관련 저장소: `api-keys`, `nestjs-tenancy`
 - 목적: Prisma 6을 사용하는 Nestarc ecosystem fixture가 `--legacy-peer-deps` 없이 strict install되도록 패키지 메타데이터와 호환성 검증을 정리한다.
+
+> [!NOTE]
+> 상태: `HISTORICAL / COMPLETED`. `0.3.1`과 Nest 11/Prisma 7 후속 `0.3.2`는 모두 npm
+> 배포와 published-only 검증까지 완료됐다. 현재 지원 계약은 [README](../README.md), 새 작업은
+> [canonical 유지보수 큐](./2026-08-30-p0-p3-maintenance-work-plan.md)를 기준으로 한다.
 
 ## 작업 결과 (2026-08-23)
 
@@ -291,9 +296,9 @@ Prisma 5/6 peer metadata와 `0.3.1` 배포 작업에는 남은 항목이 없다.
 `@nestarc/jobs` handler auto-discovery 초기화 계약도 Jobs `0.3.1`과 tenancy
 published-only strict lane으로 완료됐다.
 
-### `0.3.2` Nest 11 / Prisma 7 후보 후속 (2026-08-30)
+### `0.3.2` Nest 11 / Prisma 7 완료 후속 (2026-08-30)
 
-TEN-M21의 API Keys 선행 조건을 충족하도록 다음을 별도 패치 후보에 추가했다.
+TEN-M21의 API Keys 선행 조건을 충족하도록 다음을 별도 패치에 추가했다.
 
 - Nest peer를 `^10.0.0 || ^11.0.0`, optional Prisma client peer를
   `^5.0.0 || ^6.0.0 || ^7.0.0`으로 확대했다.
@@ -311,16 +316,18 @@ TEN-M21의 API Keys 선행 조건을 충족하도록 다음을 별도 패치 후
   직접 덮어쓰는 설치는 `ERESOLVE`한다. CI/release E2E runtime을 `$RUNNER_TEMP`에
   격리해 이 무관한 dev-tree 충돌을 피하며, `--force`와 `--legacy-peer-deps`는 사용하지 않는다.
 
-이 기록은 아직 npm 배포 완료를 뜻하지 않는다. `@nestarc/api-keys@0.3.2` publish와 registry
-peer metadata 확인 후에만 TEN-M21 published-only 준비 완료 증거로 사용할 수 있다.
+`@nestarc/api-keys@0.3.2`는 2026-08-30T04:50:07.525Z에 npm `latest`로 게시됐다. GitHub
+Release, npm `gitHead`, `origin/main`은 모두 `a24fe1d656e32dae0fe04d14a0df2fec5a15b41e`를
+가리키며 registry의 Nest 10/11 및 optional Prisma 5/6/7 peer metadata도 확인했다. TEN-M21은
+이 published package로 legacy/modern 실제 경로를 각각 3/3 통과해 완료됐다.
 
 회귀 확인용 프롬프트:
 
 ```text
 docs/prisma-peer-compatibility-plan-2026-08-23.md와
 nestjs-tenancy/docs/tenancy-strategy-validation-2026-08-21.md를 읽고,
-완료된 @nestarc/api-keys@0.3.1 published baseline과 @nestarc/jobs@0.3.1
-application-bootstrap handler discovery 계약을 보존하세요. @nestarc/api-keys@0.3.2가
-배포되면 registry peer metadata를 확인한 뒤 exact Nest 11.2.1/Prisma 7.10.0
-published-only ecosystem E2E를 회귀 검증해 주세요.
+완료된 @nestarc/api-keys@0.3.2 published baseline과 @nestarc/jobs@0.3.1
+application-bootstrap handler discovery 계약을 보존하세요. 새 API Keys/RBAC patch가
+배포되면 tenancy의 TEN-ECO-NEXT 작업에서 exact published tuple의 legacy/modern ecosystem
+E2E를 회귀 검증해 주세요.
 ```
