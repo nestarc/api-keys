@@ -120,7 +120,7 @@ M  docs/prisma-peer-compatibility-plan-2026-08-23.md
 | 축 | 공개 선언 | 현재 자동 증거 | 남은 결정 |
 | --- | --- | --- | --- |
 | Node | `^22.13.0 || ^24.0.0` | source exact Node 22.13.0/Node 24, DB·consumer Node 22.13.0, publish Node 24 | Node 26 등 새 major는 명시적 matrix 검증 뒤 추가 |
-| NestJS | 10/11 | Nest 11.2.3 full source suite+strict/HTTP, Nest 10.4.20 strict/HTTP | Nest 12는 `AK-M23` evidence 뒤 결정 |
+| NestJS | 10/11 | Nest 11.2.3 full source suite+strict/HTTP, Nest 10.4.20 strict/HTTP; Nest 12.0.1 Node 24 HTTP runtime PASS, strict declaration FAIL | Nest 12는 `AK-M24` declaration/package 결정과 full matrix 뒤 추가 |
 | Prisma | 5/6/7 optional | 각 major PostgreSQL 16 contract, 6/7 대표 strict consumers, no-Prisma root consumer | 결합 변경/실패 때만 targeted off-diagonal 추가 |
 | PostgreSQL | 14+ | Prisma 5 + PostgreSQL 14 boundary, Prisma 5/6/7 + PostgreSQL 16 current | 새 하한/상한은 real DB evidence 뒤 변경 |
 | module format | CommonJS runtime + explicit root/asset `exports` | CJS, native ESM, NodeNext, no-Prisma packed consumer | 별도 ESM build는 실제 최적화/consumer 요구 전까지 도입하지 않음 |
@@ -180,7 +180,8 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 19B | `AK-M20B` | P2 | `DONE` | M | `AK-M02` | reusable storage contract의 public package 계약 |
 | 20 | `AK-M21` | P3 | `DONE` | M | `AK-M10` | `exports`/ESM packaging ADR |
 | 21 | `AK-M22` | P3 | `DONE` | S | `AK-M02` | collision retry terminal error 계약 |
-| 22 | `AK-M23` | P3 | `READY` | S | `AK-M10` | Nest 12 stable strict-consumer 호환성 스파이크 |
+| 22 | `AK-M23` | P3 | `DONE` | S | `AK-M10` | Nest 12 stable strict-consumer 호환성 스파이크 |
+| 23 | `AK-M24` | P3 | `DECISION` | M | `AK-M23` | Nest 12 ESM declaration/package 호환성 결정·구현 |
 
 P0는 `AK-M01`과 `AK-M02`를 서로 다른 PR로 진행한다. 어느 하나의 완료가 다른 하나를 대체하지 않는다.
 
@@ -218,6 +219,7 @@ P0는 `AK-M01`과 `AK-M02`를 서로 다른 PR로 진행한다. 어느 하나의
 | `AK-M21` | package exports/build/consumer | 공개 deep import 사용처와 CJS/ESM 소비자를 조사한 ADR만 먼저 작성한다. |
 | `AK-M22` | create/rotate retry errors | `AK-M02`의 새 rotation protocol 위에서 항상 duplicate를 반환하는 adapter의 마지막 retry error를 stable-contract test로 고정한다. |
 | `AK-M23` | peer metadata, packed consumer | `AK-M10`의 증거 정책 위에서 Nest 12.0.1 exact strict consumer를 실행해 첫 install/type/runtime 실패를 기록한다. |
+| `AK-M24` | declarations, package/build metadata, strict/HTTP consumers | 임시 Nest 12 peer 완화에서 재현된 `TS1479`/`TS1542`를 permanent RED fixture로 만들고 CommonJS declaration bridge, conditional declarations/output, ESM migration을 비교한다. |
 
 ## 3. P0 작업 명세
 
@@ -923,10 +925,43 @@ operation error를 바꾸지 않는다. random generator와 base62 sampling은 �
 
 ### `AK-M23` — Nest 12 stable compatibility spike
 
-- 상태: `P3 / READY (AK-M10 DONE)`
+- 상태: `P3 / DONE (AK-M10 DONE)`
 - 2026-08-30 기준 [`@nestjs/core` latest는 12.0.1](https://www.npmjs.com/package/%40nestjs/core?activeTab=versions)이므로 더 이상 “stable 대기” 후보로 두지 않는다.
 - Nest 12.0.1 exact versions를 strict packed consumer에 설치해 install, typecheck, runtime smoke와 실제 HTTP Guard 경로를 조사한다.
 - 이 세션은 evidence와 ADR만 소유한다. peer 범위 확대, breaking migration, 구현 변경은 결과에 따라 별도 task/PR로 만든다.
+
+완료 조건:
+
+- [x] 현재 peer metadata에서 exact Nest 12.0.1 strict install의 첫 실패를 기록한다.
+- [x] 임시 peer 완화 candidate로 exact install과 `skipLibCheck: false` declaration typecheck를 조사한다.
+- [x] Nest DI/runtime과 실제 HTTP Guard 경로를 조사한다.
+- [x] consumer ESM 설정만으로 declaration failure를 해결할 수 있는지 확인한다.
+- [x] 현재 지원 범위와 후속 implementation task를 결정한 ADR을 남긴다.
+
+완료 결정(2026-08-31): 현재 peer 범위에서는 Nest 12.0.1 strict install이 예상대로 `ERESOLVE`다.
+peer만 임시로 `^12.0.0`까지 넓히면 exact Nest 12.0.1/Prisma 7.10.0 install과 Node 24 실제
+HTTP Guard 10-case runtime은 통과하지만, CommonJS로 분류되는 packed declaration이 Nest 12 ESM
+types를 import하면서 `TS1479`/`TS1542`로 실패한다. consumer를 `type: module`로 바꿔도 library
+declaration 오류는 유지됐다. 따라서 지원표와 peer 범위는 Nest 10/11로 유지한다. declaration/package
+전략 결정과 구현, Node 22.13.0/24 full evidence는 별도 `AK-M24`가 소유한다. 근거와 선택지는
+[`2026-08-31-nest-12-compatibility-spike-adr.md`](./2026-08-31-nest-12-compatibility-spike-adr.md)에 있다.
+
+### `AK-M24` — Nest 12 ESM declaration/package compatibility
+
+- 상태: `P3 / DECISION (AK-M23 DONE)`
+- CommonJS canonical runtime을 유지하는 declaration bridge, conditional declarations/output, package
+  ESM migration을 비교하고 Nest 10/11 compatibility와 loader identity 영향을 먼저 결정한다.
+- 선택한 전략으로 exact Nest 12.0.1 strict install/type/runtime와 HTTP Guard를 Node 22.13.0/24에서
+  모두 통과한 같은 변경에서만 peer 범위를 확대한다.
+- `--force`, `--legacy-peer-deps`, `skipLibCheck: true`는 acceptance evidence로 사용하지 않는다.
+
+완료 조건:
+
+- [ ] `AK-M23`의 `TS1479`/`TS1542`를 permanent RED fixture로 고정한다.
+- [ ] declaration/package 전략과 pre-1.0 versioning/migration 영향을 ADR로 결정한다.
+- [ ] Nest 10.4.20/11.2.3 기존 CommonJS/native ESM/NodeNext/no-Prisma 계약을 보존한다.
+- [ ] Nest 12.0.1 exact strict declaration, DI/runtime, HTTP Guard가 Node 22.13.0/24에서 통과한다.
+- [ ] peer metadata, README/CHANGELOG, CI/release matrix를 같은 변경으로 갱신한다.
 
 ### 결정 대기 후보
 
@@ -1092,8 +1127,9 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 4. profile A/B/D와 packed RBAC consumer를 다시 통과시켜 `AK-M06B`를 `DONE` 처리하고,
    tenancy-owned `TEN-ECO-NEXT`에 published package tuple을 인계한다.
 5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`, `AK-M11/12/13/15/16`,
-   `AK-M17A/B`, `AK-M18/19`, `AK-M20A/B`, `AK-M21/22`는 완료됐다. 외부 RBAC release를 기다리는
-   동안 다음 큐 작업은 `AK-M23`의 exact Nest 12.0.1 compatibility evidence spike다.
+   `AK-M17A/B`, `AK-M18/19`, `AK-M20A/B`, `AK-M21/22/23`은 완료됐다. 외부 RBAC release를
+   기다리는 동안 다음 로컬 작업은 `AK-M24`의 Nest 12 declaration/package 전략 결정이며
+   `AK-M06B` 완료와는 독립이다.
 
 Published RBAC 0.2.1은 `request.apiKeyContext` conflict와 trim/coerce 계약 때문에 의도적으로
 RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증거로 사용하지 않는다.
@@ -1131,6 +1167,7 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-31 | `AK-M20A` | `DONE` | `5ff983d` | `5ff983d + worktree` (PR/release 없음) | README support evidence, PRD optional Prisma/Node contract, v0.1–v0.3 historical markers, v0.3.2 release/npm metadata 재조회, 문서 format/link PASS | `AK-M20B` public storage contract 구현 |
 | 2026-08-31 | `AK-M20B` | `DONE` | `5ff983d` | `5ff983d + worktree` (PR/release 없음) | RED missing root export, public runner 9 checks, packed no-Prisma custom adapter compile/runtime, 13 suites/208 tests, coverage 90.46/84.42/89.79/90.18, 50-file allowlist PASS | AK-M20A/B 변경 검토·commit 뒤 `AK-M21` packaging ADR |
 | 2026-08-31 | `AK-M22` | `DONE` | `db2ce10` | `db2ce10 + worktree` (PR/release 없음) | RED create/rotate raw terminal Error 2건, 3-attempt typed cause/metric contract, 13 suites/212 tests, coverage 90.63/84.49/90.06/90.36, no-Prisma와 CJS/ESM packed consumers PASS | AK-M22 변경 검토·commit 뒤 `AK-M23` Nest 12 evidence spike |
+| 2026-08-31 | `AK-M23` | `DONE` | `bd0d793` | `bd0d793 + worktree` (PR/release 없음) | 현재 peer strict install ERESOLVE; 임시 peer 완화 exact install PASS, declaration TS1479/TS1542 FAIL, Node 24 HTTP Guard 10 cases PASS, ESM consumer 변형도 declaration FAIL | `AK-M24`에서 declaration/package 전략 결정 뒤 Node 22.13.0/24 full matrix |
 
 ### AK-M01 종료 인계
 
@@ -2149,4 +2186,37 @@ Unverified paths and reason: storage interface, built-in adapter mutation, schem
 External PR/release evidence: 새 PR/release 없음. 기존 GitHub v0.3.2와 npm 0.3.2만 재조회했다.
 Next exact action: AK-M22 변경만 검토·commit해 planned 0.4.0 branch에 포함한 뒤 AK-M23의 exact
   Nest 12.0.1 strict packed consumer evidence spike를 시작한다.
+```
+
+### AK-M23 종료 인계
+
+```text
+Task: AK-M23
+State: DONE
+Start ref / end ref: bd0d793 / bd0d793 + session worktree (commit·PR·release 없음)
+Changed files: docs/2026-08-31-nest-12-compatibility-spike-adr.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: runtime smoke만으로 Nest 12 지원을 선언하지 않는다. 현재 Nest 10/11 peer와
+  persistent matrix를 유지하며 exact strict install, skipLibCheck false declaration, DI/runtime,
+  HTTP Guard가 Node 22.13.0/24에서 모두 green인 같은 변경에서만 Nest 12 peer를 추가한다.
+Commands and exact results:
+  npm view @nestjs/common/core/platform-express@12.0.1 metadata => exact 12.0.1;
+    common/core type module, core engines >=20와 common peer ^12.0.0 확인
+  npm run test:consumer:strict -- --nest 12.0.1 --prisma 7.10.0 => expected ERESOLVE;
+    packed peer ^10.0.0 || ^11.0.0이 exact Nest 12.0.1을 거절
+  temporary peer-only expansion + same strict command => install 29 packages and exact Nest
+    12.0.1/Prisma 7.10.0 tree PASS; skipLibCheck false typecheck FAIL with TS1479/TS1542/TS1541
+  temporary ESM consumer variant => consumer TS1541 제거, packed declaration TS1479/TS1542 유지
+  temporary peer-only expansion + node scripts/test-http-consumer.js --nest 12.0.1 => install 107
+    packages, Nest HTTP default-filter 10-case contract and tarball consumer PASS on Node 24.11.1
+  temporary peer/script edits restored; repository diff에는 문서 두 개만 남음
+  npm run lint -- --no-cache; tsc --noEmit -p tsconfig.build.json => PASS
+  npm test -- --runInBand => 13 suites, 212 tests PASS
+  ADR Prettier, plan targeted diff/link inspection, git diff --check => PASS
+Unverified paths and reason: Nest 12 Node 22.13.0 runtime과 source/DB/coverage matrix는 public declaration
+  failure 때문에 지원 확대를 진행하지 않아 실행하지 않았다. package/source/workflow는 변경하지
+  않았고 remote CI/tag release/npm publish도 없다.
+External PR/release evidence: 새 PR/release 없음. npm registry의 exact Nest 12.0.1 metadata만 조회했다.
+Next exact action: AK-M24에서 TS1479/TS1542 fixture를 permanent RED로 고정하고 CommonJS declaration
+  bridge, conditional declarations/output, ESM migration 중 전략과 versioning을 결정한다.
 ```
