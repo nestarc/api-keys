@@ -69,6 +69,10 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ### Changed
 
+- Make tagged releases fail unless the tag commit is on canonical `origin/main` and the tag,
+  package version, and dated changelog heading agree. The workflow now packs one allowlisted
+  tarball, verifies its SHA-256/SRI in downstream consumers, and publishes those exact bytes via
+  trusted publishing instead of rebuilding after consumer verification.
 - Define `list()` as a backward-compatible non-revoked management-history query: expired and
   rotated records remain in the default result, `includeRevoked: true` adds revoked records, and
   both built-in adapters now order by `createdAt` descending then `id` ascending. Consumers that

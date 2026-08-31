@@ -5,7 +5,53 @@ on:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: read
+
 jobs:
+  prepare-release:
+    name: verify source and pack release candidate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Fetch canonical main
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - run: npm ci
+
+      - name: Verify tag ancestry and release versions
+        run: >-
+          npm run release:verify-source --
+          --tag "$GITHUB_REF_NAME"
+          --commit "$GITHUB_SHA"
+          --main-ref refs/remotes/origin/main
+
+      - run: npm run test:release:source
+
+      - run: npm run test:release:workflow
+
+      - run: npm run build
+
+      - name: Pack the release candidate once
+        run: npm run release:prepare-candidate -- "$RUNNER_TEMP/api-keys-release-candidate"
+
+      - name: Upload the exact release candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/api-keys-release-candidate
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   verify-coverage:
     name: coverage floor
     runs-on: ubuntu-latest
@@ -35,6 +81,9 @@ jobs:
   verify-http:
     name: http consumer (Nest ${{ matrix.nest }})
     runs-on: ubuntu-latest
+    needs: prepare-release
+    env:
+      API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
     strategy:
       fail-fast: false
       matrix:
@@ -52,6 +101,11 @@ jobs:
           package-manager-cache: false
 
       - run: npm ci
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/api-keys-release-candidate
 
       - run: npm run ${{ matrix.script }}
 
@@ -73,6 +127,9 @@ jobs:
   verify-packed-consumer:
     name: packed consumer (${{ matrix.name }})
     runs-on: ubuntu-latest
+    needs: prepare-release
+    env:
+      API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
     strategy:
       fail-fast: false
       matrix:
@@ -93,12 +150,17 @@ jobs:
 
       - run: npm ci
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/api-keys-release-candidate
+
       - run: npm run ${{ matrix.script }}
 
   publish:
     name: publish to npm
     runs-on: ubuntu-latest
-    needs: [verify-coverage, verify-postgres, verify-packed-consumer, verify-http]
+    needs: [prepare-release, verify-coverage, verify-postgres, verify-packed-consumer, verify-http]
     environment: npm
     permissions:
       contents: read
@@ -118,21 +180,22 @@ jobs:
 
       - run: npm test -- --ci
 
-      - run: npm run build
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/api-keys-release-candidate
 
-      - name: Verify tag matches package.json version
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          pkg="$(node -p "require('./package.json').version")"
-          if [ "$tag" != "$pkg" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg"
-            exit 1
-          fi
+      - name: Verify the candidate artifact bytes
+        id: candidate
+        run: >-
+          npm run release:verify-candidate --
+          "$RUNNER_TEMP/api-keys-release-candidate"
+          --github-output "$GITHUB_OUTPUT"
 
       - name: Resolve npm dist-tag
         id: disttag
         run: |
-          version="$(node -p "require('./package.json').version")"
+          version="${{ steps.candidate.outputs.version }}"
           if [[ "$version" == *-* ]]; then
             echo "tag=next" >> "$GITHUB_OUTPUT"
           else
@@ -140,4 +203,7 @@ jobs:
           fi
 
       - name: Publish
-        run: npm publish --access public --tag "${{ steps.disttag.outputs.tag }}"
+        run: >-
+          npm publish "${{ steps.candidate.outputs.tarball }}"
+          --access public
+          --tag "${{ steps.disttag.outputs.tag }}"

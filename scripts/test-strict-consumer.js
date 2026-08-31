@@ -1,8 +1,9 @@
 const { spawnSync } = require('node:child_process');
-const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+
+const { resolveConsumerCandidate } = require('./package-candidate');
 
 const projectRoot = path.resolve(__dirname, '..');
 const DEFAULT_NEST_VERSION = '11.2.3';
@@ -43,9 +44,11 @@ function npmConfigEnabled(configName) {
   );
 }
 
-function strictNpmEnv() {
+function strictNpmEnv(tempDir) {
   return {
     ...process.env,
+    npm_config_cache: path.join(tempDir, 'npm-cache'),
+    NPM_CONFIG_CACHE: path.join(tempDir, 'npm-cache'),
     npm_config_force: 'false',
     NPM_CONFIG_FORCE: 'false',
     npm_config_legacy_peer_deps: 'false',
@@ -299,25 +302,8 @@ function main() {
   const versions = parseVersions(process.argv.slice(2));
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-keys-strict-consumer-'));
   try {
-    run('npm', ['run', 'build']);
-    const packEntries = JSON.parse(
-      run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', tempDir], {
-        capture: true,
-      }),
-    );
-    const packedArtifact = packEntries[0];
-
-    if (!packedArtifact?.filename || !packedArtifact.integrity || !packedArtifact.version) {
-      throw new Error('npm pack --json did not report filename, version, and integrity');
-    }
-
-    const tarballPath = path.join(tempDir, packedArtifact.filename);
-    const computedIntegrity = `sha512-${createHash('sha512')
-      .update(fs.readFileSync(tarballPath))
-      .digest('base64')}`;
-    if (computedIntegrity !== packedArtifact.integrity) {
-      throw new Error('npm pack integrity does not match the tarball bytes');
-    }
+    const packedArtifact = resolveConsumerCandidate({ tempDirectory: tempDir });
+    const tarballPath = packedArtifact.tarballPath;
     const consumerDir = path.join(tempDir, 'consumer');
     fs.mkdirSync(consumerDir);
     fs.writeFileSync(
@@ -359,7 +345,7 @@ function main() {
       ],
       {
         cwd: consumerDir,
-        env: strictNpmEnv(),
+        env: strictNpmEnv(tempDir),
       },
     );
     run('npm', ['ls', '--depth=0'], { cwd: consumerDir });

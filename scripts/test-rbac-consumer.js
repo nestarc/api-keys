@@ -1,8 +1,9 @@
 const { spawnSync } = require('node:child_process');
-const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+
+const { resolveConsumerCandidate } = require('./package-candidate');
 
 const projectRoot = path.resolve(__dirname, '..');
 const NEST_VERSION = '11.2.3';
@@ -208,19 +209,8 @@ function main() {
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-keys-rbac-consumer-'));
   try {
-    run('npm', ['run', 'build']);
-    const [packedArtifact] = JSON.parse(
-      run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', tempDir], {
-        capture: true,
-      }),
-    );
-    const tarballPath = path.join(tempDir, packedArtifact.filename);
-    const computedIntegrity = `sha512-${createHash('sha512')
-      .update(fs.readFileSync(tarballPath))
-      .digest('base64')}`;
-    if (computedIntegrity !== packedArtifact.integrity) {
-      throw new Error('API Keys candidate integrity does not match its packed bytes');
-    }
+    const packedArtifact = resolveConsumerCandidate({ tempDirectory: tempDir });
+    const tarballPath = packedArtifact.tarballPath;
 
     const consumerDir = path.join(tempDir, 'consumer');
     fs.mkdirSync(consumerDir);

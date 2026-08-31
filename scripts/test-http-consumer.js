@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+const { resolveConsumerCandidate } = require('./package-candidate');
+
 const projectRoot = path.resolve(__dirname, '..');
 
 function run(command, args, options = {}) {
@@ -190,14 +192,11 @@ function main() {
       ...process.env,
       npm_config_cache: path.join(tempDir, 'npm-cache'),
     };
-    run('npm', ['run', 'build']);
-    const packEntries = JSON.parse(
-      run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', tempDir], {
-        capture: true,
-        env: npmEnv,
-      }),
-    );
-    const tarballPath = path.join(tempDir, packEntries[0].filename);
+    const packedArtifact = resolveConsumerCandidate({
+      tempDirectory: tempDir,
+      env: npmEnv,
+    });
+    const tarballPath = packedArtifact.tarballPath;
     const consumerDir = path.join(tempDir, 'consumer');
     fs.mkdirSync(consumerDir);
     fs.writeFileSync(
@@ -234,11 +233,7 @@ function main() {
       ],
       { cwd: consumerDir, env: npmEnv },
     );
-    for (const packageName of [
-      '@nestjs/common',
-      '@nestjs/core',
-      '@nestjs/platform-express',
-    ]) {
+    for (const packageName of ['@nestjs/common', '@nestjs/core', '@nestjs/platform-express']) {
       const actual = installedVersion(consumerDir, packageName);
       if (actual !== nestVersion) {
         throw new Error(`Expected ${packageName}@${nestVersion}, installed ${actual}`);

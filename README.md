@@ -625,6 +625,9 @@ strict consumers both install Prisma and do not count for that claim.
 `npm run test:consumer:http:nest10` and `npm run test:consumer:http:nest11` pack the library and
 exercise the default Nest HTTP exception pipeline with the exact supported Nest versions. They
 verify the 401/403 status matrix and the safe public error body without installing a custom filter.
+Consumer commands pack a local candidate by default. The release workflow instead sets
+`API_KEYS_PACKAGE_CANDIDATE_DIR`, causing every packed and HTTP consumer to verify and install the
+single candidate artifact prepared for that workflow run.
 
 After an RBAC version containing both `RBAC-M01` and `RBAC-M02` is published, run
 `npm run test:consumer:rbac -- --rbac <exact-version>`. The consumer installs only the packed API
@@ -633,9 +636,12 @@ canonical/legacy API-key conflicts plus trusted tenant reconciliation. Published
 known RED prerequisite result and must not be used as passing evidence for this gate.
 
 Releases are tag-driven: `npm version <bump> && git push --tags` triggers the workflow in
-[`.github/workflows/release.yml`](.github/workflows/release.yml), which repeats the PostgreSQL,
-Prisma, packed-consumer, and Nest HTTP gates before publishing to npm with provenance. Pre-release
-versions (anything with a `-` in the version) are published under the `next` dist-tag.
+[`.github/workflows/release.yml`](.github/workflows/release.yml). Before packaging, the workflow
+requires the tag commit to be on canonical `origin/main` and requires the tag, `package.json`, and
+dated `CHANGELOG.md` release heading to agree. It builds and packs once, records the tarball's
+SHA-256, SRI, and content allowlist, sends those exact bytes through the packed-consumer and Nest
+HTTP gates, and publishes that verified tarball through npm trusted publishing with provenance.
+Pre-release versions (anything with a `-` in the version) are published under the `next` dist-tag.
 
 ## License
 

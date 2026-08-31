@@ -1,8 +1,9 @@
 const { spawnSync } = require('node:child_process');
-const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+
+const { resolveConsumerCandidate } = require('./package-candidate');
 
 const projectRoot = path.resolve(__dirname, '..');
 const NEST_VERSION = '11.2.3';
@@ -178,24 +179,11 @@ function main() {
 
   try {
     const npmEnv = strictNpmEnv(tempDir);
-    run('npm', ['run', 'build']);
-    const packEntries = JSON.parse(
-      run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', tempDir], {
-        capture: true,
-        env: npmEnv,
-      }),
-    );
-    const packedArtifact = packEntries[0];
-    if (!packedArtifact?.filename || !packedArtifact.integrity) {
-      throw new Error('npm pack --json did not report filename and integrity');
-    }
-    const tarballPath = path.join(tempDir, packedArtifact.filename);
-    const computedIntegrity = `sha512-${createHash('sha512')
-      .update(fs.readFileSync(tarballPath))
-      .digest('base64')}`;
-    if (computedIntegrity !== packedArtifact.integrity) {
-      throw new Error('npm pack integrity does not match the tarball bytes');
-    }
+    const packedArtifact = resolveConsumerCandidate({
+      tempDirectory: tempDir,
+      env: npmEnv,
+    });
+    const tarballPath = packedArtifact.tarballPath;
 
     const consumerDir = path.join(tempDir, 'consumer');
     fs.mkdirSync(consumerDir);

@@ -172,8 +172,8 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 15 | `AK-M16` | P2 | `DONE` | S | `AK-M05` | InMemory storage record Date defensive copy |
 | 16A | `AK-M17A` | P2 | `DONE` | S | 없음 | `SECURITY.md`와 지원 release policy |
 | 16B | `AK-M17B` | P2 | `DONE` | S | `AK-M17A` | GitHub reporting/security/ruleset 설정 |
-| 17 | `AK-M18` | P2 | `READY` | M | `AK-M08A`, `AK-M09` | release ancestry와 pack-once provenance |
-| 18 | `AK-M19` | P2 | `BLOCKED` | M | `AK-M08A`, `AK-M08B`, `AK-M08C`, `AK-M18` | CI/release/Dependabot 구조 정리 |
+| 17 | `AK-M18` | P2 | `DONE` | M | `AK-M08A`, `AK-M09` | release ancestry와 pack-once provenance |
+| 18 | `AK-M19` | P2 | `READY` | M | `AK-M08A`, `AK-M08B`, `AK-M08C`, `AK-M18` | CI/release/Dependabot 구조 정리 |
 | 19A | `AK-M20A` | P2 | `READY` | S | `AK-M09`, `AK-M10` | 문서 권위와 현재 지원표 정렬 |
 | 19B | `AK-M20B` | P2 | `READY` | M | `AK-M02` | reusable storage contract의 public package 계약 |
 | 20 | `AK-M21` | P3 | `DECISION` | M | `AK-M10` | `exports`/ESM packaging ADR |
@@ -772,21 +772,33 @@ active이며 bypass actor가 없다. PR approval 수와 signed commit은 현 con
 
 ### `AK-M18` — release ancestry와 pack-once provenance
 
-- 상태: `P2 / READY`
+- 상태: `P2 / DONE`
 
 완료 조건:
 
-- [ ] tag commit이 canonical `origin/main` ancestry에 포함됨을 publish 전에 확인한다.
-- [ ] tag/package/CHANGELOG version이 일치한다.
-- [ ] consumer가 검증한 exact tarball을 publish하거나 SHA/integrity로 동일성을 증명한다.
-- [ ] trusted publishing, provenance, 최소 권한을 유지한다.
-- [ ] ancestry/pack-once fixture와 workflow dry-run이 통과하면 이 구현 작업을 `DONE` 처리할 수 있다. 다음 실제 release 결과를 기다리지 않는다.
+- [x] tag commit이 canonical `origin/main` ancestry에 포함됨을 publish 전에 확인한다.
+- [x] tag/package/CHANGELOG version이 일치한다.
+- [x] consumer가 검증한 exact tarball을 publish하거나 SHA/integrity로 동일성을 증명한다.
+- [x] trusted publishing, provenance, 최소 권한을 유지한다.
+- [x] ancestry/pack-once fixture와 workflow dry-run이 통과하면 이 구현 작업을 `DONE` 처리할 수 있다. 다음 실제 release 결과를 기다리지 않는다.
 
 검증: ancestry success/failure fixture, package content allowlist, candidate tarball SHA/integrity, workflow command graph. 실제 release의 npm `gitHead`/attestation은 §9 release evidence에 누적한다.
 
+완료 결정(2026-08-31): tag checkout은 full history에서 canonical
+`refs/remotes/origin/main`을 다시 fetch하고 tag commit이 그 ancestry에 포함되는지 확인한다. annotated
+tag도 commit으로 해석하며 workflow commit과 tag target이 다르면 거부한다. tag의 `v`를 제외한
+version, `package.json`, `CHANGELOG.md`의 dated release heading도 publish 전에 정확히 일치해야 한다.
+Node 24 prepare job이 allowlist를 적용해 tarball을 한 번만 만들고 SHA-256, SHA-512 SRI, 파일 manifest를
+metadata로 저장한다. release packed/HTTP consumer와 publish job은 같은 workflow artifact를 내려받아
+바이트와 manifest를 재검증하며, publish job은 checkout을 다시 build/pack하지 않고 검증된 tarball
+경로를 `npm publish`에 전달한다. workflow 기본 권한은 `contents: read`, publish job만 기존 npm
+environment의 `id-token: write`를 유지하므로 trusted publishing과 자동 provenance 계약은 유지된다.
+실제 registry publish와 attestation 증거는 다음 release에서 §9에 누적하며 이 작업의 `DONE`을 막지
+않는다.
+
 ### `AK-M19` — workflow와 dependency bot 수렴
 
-- 상태: `P2 / BLOCKED (AK-M18)`
+- 상태: `P2 / READY (AK-M18 DONE)`
 
 완료 조건:
 
@@ -968,8 +980,9 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
   test, build, tag/package version check 후 trusted publish를 실행한다.
 - source CI와 tag release의 exact Node 22.13.0 coverage job은 global/critical-file floor를 강제하고
   JSON/text summary artifact를 14일 보존한다. release `publish`는 이 job도 선행으로 요구한다.
-- 현재 workflow에는 production audit gate, `git diff --check`, main ancestry, CHANGELOG version check,
-  pack-once identity가 없다. 이를 이미 강제되는 gate로 기록하지 않는다.
+- 현재 workflow에는 production audit gate와 `git diff --check`가 없다. main ancestry,
+  tag/package/CHANGELOG version, allowlisted pack-once identity는 `AK-M18`에서 persistent gate로
+  추가됐다.
 
 ### 9.2 현재 수동 release checklist
 
@@ -995,7 +1008,7 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 - [x] `AK-M10`: PostgreSQL 14/16와 no-Prisma packed consumer
 - [x] `AK-M11`: fresh coverage threshold
 - [x] `AK-M12`: serialized public summary와 packed declaration/runtime verifier-material exclusion
-- [ ] `AK-M18`: main ancestry와 consumer-verified exact tarball identity
+- [x] `AK-M18`: main ancestry와 consumer-verified exact tarball identity
 - [ ] `AK-M20B`: public storage contract 또는 corrected documentation packed test
 
 `TEN-ECO-NEXT`의 published-only evidence는 tenancy-owned external gate다. API Keys release에서는 `AK-M06B`의 packed pre-publish consumer를 지속 gate로 유지해 순환을 만들지 않는다. 향후 gate를 완료 전 P0 patch의 선행 조건으로 소급 적용하지 않는다.
@@ -1011,8 +1024,8 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 4. profile A/B/D와 packed RBAC consumer를 다시 통과시켜 `AK-M06B`를 `DONE` 처리하고,
    tenancy-owned `TEN-ECO-NEXT`에 published package tuple을 인계한다.
 5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`, `AK-M11/12/13/15/16`,
-   `AK-M17A/B`는 완료됐다. 외부 RBAC release를 기다리는 동안 다음 큐 작업은 `AK-M18`의
-   release ancestry와 pack-once provenance다.
+   `AK-M17A/B`, `AK-M18`은 완료됐다. 외부 RBAC release를 기다리는 동안 다음 큐 작업은
+   `AK-M19`의 CI/release/Dependabot 구조 정리다.
 
 Published RBAC 0.2.1은 `request.apiKeyContext` conflict와 trim/coerce 계약 때문에 의도적으로
 RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증거로 사용하지 않는다.
@@ -1045,6 +1058,7 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-31 | `AK-M16` | `DONE` | `846bfe8` | `846bfe8 + worktree` (PR/release 없음) | RED 8 failures, source 12 suites/202 tests, coverage 88.45/84.16/87.50/88.10, PostgreSQL 14/16 + Prisma 5/6/7 각 30 tests PASS | AK-M16 변경을 단독 P2 PR로 검토·commit한 뒤 `AK-M17A` SECURITY/reporting policy 결정 |
 | 2026-08-31 | `AK-M17A` | `DONE` | `20940ff` | `20940ff + worktree` (PR/release 없음) | root SECURITY policy resolver, relative link, supported release table, private reporting URL, SECURITY.md Prettier PASS | SECURITY.md 문서 변경을 검토·commit한 뒤 별도 repository settings evidence 확인 |
 | 2026-08-31 | `AK-M17B` | `DONE` | `20940ff` | GitHub repository settings + rulesets `21923571`, `21923576` | private reporting/Dependabot security updates/secret scanning/push protection enabled, active no-bypass main/tag rulesets API 재조회 PASS | `AK-M18` release ancestry와 pack-once provenance 시작 |
+| 2026-08-31 | `AK-M18` | `DONE` | `24bb8bd` | `24bb8bd + worktree` (PR/release 없음) | ancestry/version fixtures, allowlist+tamper fixture, workflow graph/YAML, 48-file exact candidate SHA/SRI, Nest 10/11 strict+HTTP와 no-Prisma consumers, publish dry-run PASS | AK-M18 변경을 검토·commit한 뒤 `AK-M19` workflow/dependency bot 수렴 시작 |
 
 ### AK-M01 종료 인계
 
@@ -1828,4 +1842,52 @@ External PR/release evidence: GitHub rulesets https://github.com/nestarc/api-key
   https://github.com/nestarc/api-keys/security/advisories/new
 Next exact action: AK-M18에서 main ancestry failure fixture와 consumer-verified pack-once identity를
   현재 release workflow graph에 먼저 표현한다.
+```
+
+### AK-M18 종료 인계
+
+```text
+Task: AK-M18
+State: DONE
+Start ref / end ref: 24bb8bd / 24bb8bd + session worktree (commit·PR·release 없음)
+Changed files: .github/workflows/ci.yml, .github/workflows/release.yml, package.json,
+  scripts/package-candidate.js, scripts/verify-release-source.js,
+  scripts/test-package-candidate.js, scripts/test-release-source.js,
+  scripts/test-release-workflow.js, scripts/test-strict-consumer.js,
+  scripts/test-http-consumer.js, scripts/test-no-prisma-consumer.js,
+  scripts/test-rbac-consumer.js, README.md, CHANGELOG.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: canonical origin/main ancestry와 tag/package/dated CHANGELOG version을 pack 전에
+  확인한다. Node 24 prepare job이 allowlisted tarball을 한 번 만들고 SHA-256/SRI/manifest를 기록한다.
+  packed/HTTP consumers와 publish job은 같은 artifact를 재검증하며 publish job은 rebuild/repack 없이
+  exact tarball을 npm trusted publishing에 전달한다. workflow 기본 권한은 contents:read이고 publish
+  job만 npm environment와 id-token:write를 유지한다.
+Commands and exact results:
+  RED: npm run test:release:source => expected FAIL, verify-release-source module absent
+  npm run test:release:source => ancestry success/outside-main failure/version mismatch fixtures PASS
+  npm run release:verify-source -- --tag v0.3.2 --commit 94929eee... --main-ref origin/main
+    => annotated tag target a24fe1d, origin/main ancestry, package/CHANGELOG 0.3.2 PASS
+  npm run test:release:candidate => 48-file allowlist and tampered-byte rejection PASS
+  npm run test:release:workflow => single prepare, shared download, no publish rebuild graph PASS
+  ruby YAML parse for release.yml and ci.yml => PASS
+  npm test -- --runInBand => 12 suites, 202 tests PASS
+  npm run test:coverage => statements 88.45%, branches 84.16%, functions 87.50%, lines 88.12%,
+    global/critical-file floors PASS
+  npm run lint; npm run build => PASS
+  final candidate => nestarc-api-keys-0.3.2.tgz, 48 files,
+    sha256 3e58ce86b680a94092f924f6fd28489e2aae5d4856739641f9ca58bb28949b06,
+    SRI sha512-nRjH/XC1q1ZnsOQ/L6kbDrvhZBlw/F/SnAgkREMrSb/DIiGmi9pre5vfM+Lp+yHOPnRkBRNqSjbTseM1bfH8Vw==
+  exact final candidate consumers => Nest 10.4.20/Prisma 6.19.3 strict PASS,
+    Nest 11.2.3/Prisma 7.10.0 strict PASS, Nest 11.2.3 no-Prisma PASS,
+    Nest 10.4.20 and 11.2.3 HTTP PASS; lockfile SRI/runtime/type contracts PASS
+  npm publish <exact-final-tarball> --access public --tag latest --dry-run => 48 files PASS,
+    reported SRI matches candidate metadata
+  git diff --check and workflow/JS/package/CHANGELOG Prettier checks => PASS
+Unverified paths and reason: remote GitHub CI/tag workflow는 push 전이라 미실행. 실제 npm publish,
+  registry gitHead, provenance attestation은 완료 조건에 따라 다음 실제 release에서 §9에 누적한다.
+  PostgreSQL/Prisma adapter matrix는 storage/runtime source를 변경하지 않아 재실행하지 않았다.
+External PR/release evidence: 새 PR/release 없음. 기준선 재조회에서 origin/main f00ce8f,
+  GitHub v0.3.2 published_at 2026-08-30T04:51:24Z, npm latest 0.3.2와 registry integrity를 확인했다.
+Next exact action: AK-M18 파일만 검토·commit한 뒤 AK-M19의 CI/release parity, action policy,
+  dependency groups, timeout/concurrency, production audit gate 계약 표를 만든다.
 ```
