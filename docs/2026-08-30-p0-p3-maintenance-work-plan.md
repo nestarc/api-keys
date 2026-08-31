@@ -179,7 +179,7 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 19A | `AK-M20A` | P2 | `DONE` | S | `AK-M09`, `AK-M10` | 문서 권위와 현재 지원표 정렬 |
 | 19B | `AK-M20B` | P2 | `DONE` | M | `AK-M02` | reusable storage contract의 public package 계약 |
 | 20 | `AK-M21` | P3 | `DONE` | M | `AK-M10` | `exports`/ESM packaging ADR |
-| 21 | `AK-M22` | P3 | `READY` | S | `AK-M02` | collision retry terminal error 계약 |
+| 21 | `AK-M22` | P3 | `DONE` | S | `AK-M02` | collision retry terminal error 계약 |
 | 22 | `AK-M23` | P3 | `READY` | S | `AK-M10` | Nest 12 stable strict-consumer 호환성 스파이크 |
 
 P0는 `AK-M01`과 `AK-M02`를 서로 다른 PR로 진행한다. 어느 하나의 완료가 다른 하나를 대체하지 않는다.
@@ -905,11 +905,21 @@ change로 기록했다. 결정 근거는
 
 ### `AK-M22` — collision retry terminal error
 
-- 상태: `P3 / READY (AK-M02 DONE)`
+- 상태: `P3 / DONE (AK-M02 DONE)`
 
-- create와 rotate가 최대 재시도 뒤 동일한 typed error/cause 계약을 제공한다.
-- 정확한 attempt count와 metric을 테스트한다.
-- random generator 자체 교체는 포함하지 않는다.
+완료 조건:
+
+- [x] create와 rotate가 최대 재시도 뒤 동일한 typed error/cause 계약을 제공한다.
+- [x] 정확한 attempt count와 metric을 테스트한다.
+- [x] random generator 자체는 교체하지 않는다.
+
+완료 결정(2026-08-31): create와 rotate는 storage가 duplicate prefix를 보고하면 각각 정확히
+3회까지 새 credential material을 생성해 시도한다. 세 번째 중복 뒤에는 같은 public
+`ApiKeyOperationError` code `api_key_prefix_collision`을 반환하고 마지막 adapter error를 표준
+`cause`로 보존한다. 중복이 아닌 storage error는 기존처럼 그대로 전파한다. terminal exhaustion은
+key/tenant/prefix를 포함하지 않는 `api_key.operation` metric을 한 번만 emit하며 operation,
+`prefix_collision_exhausted`, attempts 3만 제공한다. metric sink와 error reporter 실패는 원래
+operation error를 바꾸지 않는다. random generator와 base62 sampling은 변경하지 않았다.
 
 ### `AK-M23` — Nest 12 stable compatibility spike
 
@@ -1067,6 +1077,7 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 - [x] `AK-M12`: serialized public summary와 packed declaration/runtime verifier-material exclusion
 - [x] `AK-M18`: main ancestry와 consumer-verified exact tarball identity
 - [x] `AK-M20B`: public storage contract 또는 corrected documentation packed test
+- [x] `AK-M22`: create/rotate 3-attempt terminal collision error/cause와 operation metric contract
 
 `TEN-ECO-NEXT`의 published-only evidence는 tenancy-owned external gate다. API Keys release에서는 `AK-M06B`의 packed pre-publish consumer를 지속 gate로 유지해 순환을 만들지 않는다. 향후 gate를 완료 전 P0 patch의 선행 조건으로 소급 적용하지 않는다.
 
@@ -1081,8 +1092,8 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 4. profile A/B/D와 packed RBAC consumer를 다시 통과시켜 `AK-M06B`를 `DONE` 처리하고,
    tenancy-owned `TEN-ECO-NEXT`에 published package tuple을 인계한다.
 5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`, `AK-M11/12/13/15/16`,
-   `AK-M17A/B`, `AK-M18/19`, `AK-M20A/B`는 완료됐다. 외부 RBAC release를 기다리는 동안 다음
-   큐 작업은 `AK-M21`의 public deep import/CJS/ESM 조사와 packaging ADR이다.
+   `AK-M17A/B`, `AK-M18/19`, `AK-M20A/B`, `AK-M21/22`는 완료됐다. 외부 RBAC release를 기다리는
+   동안 다음 큐 작업은 `AK-M23`의 exact Nest 12.0.1 compatibility evidence spike다.
 
 Published RBAC 0.2.1은 `request.apiKeyContext` conflict와 trim/coerce 계약 때문에 의도적으로
 RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증거로 사용하지 않는다.
@@ -1119,6 +1130,7 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-31 | `AK-M19` | `DONE` | `9599f5f` | `9599f5f + worktree` (PR/release 없음) | workflow parity/action SHA/timeout/concurrency/audit fixtures, YAML/format, 12 suites/202 tests, coverage, PostgreSQL 14/16·Prisma 5/6/7 각 30, production/full audit 0 PASS | AK-M19 변경을 검토·commit한 뒤 `AK-M20A` 문서 권위/지원표 정렬 시작 |
 | 2026-08-31 | `AK-M20A` | `DONE` | `5ff983d` | `5ff983d + worktree` (PR/release 없음) | README support evidence, PRD optional Prisma/Node contract, v0.1–v0.3 historical markers, v0.3.2 release/npm metadata 재조회, 문서 format/link PASS | `AK-M20B` public storage contract 구현 |
 | 2026-08-31 | `AK-M20B` | `DONE` | `5ff983d` | `5ff983d + worktree` (PR/release 없음) | RED missing root export, public runner 9 checks, packed no-Prisma custom adapter compile/runtime, 13 suites/208 tests, coverage 90.46/84.42/89.79/90.18, 50-file allowlist PASS | AK-M20A/B 변경 검토·commit 뒤 `AK-M21` packaging ADR |
+| 2026-08-31 | `AK-M22` | `DONE` | `db2ce10` | `db2ce10 + worktree` (PR/release 없음) | RED create/rotate raw terminal Error 2건, 3-attempt typed cause/metric contract, 13 suites/212 tests, coverage 90.63/84.49/90.06/90.36, no-Prisma와 CJS/ESM packed consumers PASS | AK-M22 변경 검토·commit 뒤 `AK-M23` Nest 12 evidence spike |
 
 ### AK-M01 종료 인계
 
@@ -2098,4 +2110,43 @@ Unverified paths and reason: storage/runtime source와 database contract는 바�
 External PR/release evidence: 새 PR/release 없음. 공개 GitHub search와 npm registry baseline만 재조회했다.
 Next exact action: AK-M21 변경 파일만 검토·commit해 planned 0.4.0 branch에 포함한 뒤 AK-M22의
   duplicate adapter terminal retry error RED contract를 시작한다.
+```
+
+### AK-M22 종료 인계
+
+```text
+Task: AK-M22
+State: DONE
+Start ref / end ref: db2ce10 / db2ce10 + session worktree (commit·PR·release 없음)
+Changed files: src/api-keys.service.ts, src/api-keys.module.ts, src/types.ts, src/errors.ts,
+  src/payload-copy.ts, test/integration/api-keys.service.test.ts, src/errors.test.ts,
+  src/api-keys.module.test.ts, README.md, CHANGELOG.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: create와 rotate는 duplicate prefix에 정확히 3회까지 시도하고 모두 실패하면
+  `ApiKeyOperationError`의 `api_key_prefix_collision` code와 마지막 adapter error `cause`를
+  동일하게 제공한다. terminal exhaustion 때만 저카디널리티 `api_key.operation` metric 한 건을
+  emit하며 operation/outcome/attempts만 포함한다. metric observer 실패는 operation error를 바꾸지
+  않고 non-duplicate storage error는 wrapping하지 않는다. random generator는 비변경이다.
+Commands and exact results:
+  git fetch --prune --tags; git/gh/npm baseline query => origin/main f00ce8f, annotated v0.3.2
+    commit a24fe1d, GitHub Release published 2026-08-30T04:51:24Z, npm latest 0.3.2
+  baseline npm test -- --runInBand => 13 suites, 208 tests PASS
+  RED: targeted service test => create/rotate expected ApiKeyOperationError, received Error;
+    2 failed, 92 passed
+  GREEN: npm test -- --runInBand => 13 suites, 212 tests PASS
+  npm run lint -- --no-cache; npm run build => PASS
+  first fresh coverage => behavior tests PASS, service functions 97.91% below 100% floor;
+    operation metric sink-error isolation test를 추가해 누락 경로를 고정
+  final npm run test:coverage -- --coverageDirectory=/tmp/api-keys-akm22-final-coverage.qwTQIM =>
+    statements 90.63%, branches 84.49%, functions 90.06%, lines 90.36%; all floors PASS,
+    api-keys.service.ts functions 100%
+  npm run test:consumer:no-prisma => exact Nest 11.2.3/no-Prisma packed type/runtime PASS
+  npm run test:consumer:module-formats => CommonJS/native ESM/NodeNext packed contract PASS
+  task-owned diff review; git diff --check => PASS
+Unverified paths and reason: storage interface, built-in adapter mutation, schema는 바뀌지 않아
+  PostgreSQL/Prisma 5/6/7 matrix를 재실행하지 않았다. remote CI/tag release와 npm publish는 push 전이라
+  미실행했으며 planned 0.4.0 release가 소유한다.
+External PR/release evidence: 새 PR/release 없음. 기존 GitHub v0.3.2와 npm 0.3.2만 재조회했다.
+Next exact action: AK-M22 변경만 검토·commit해 planned 0.4.0 branch에 포함한 뒤 AK-M23의 exact
+  Nest 12.0.1 strict packed consumer evidence spike를 시작한다.
 ```

@@ -44,6 +44,7 @@ export class ApiKeyError extends HttpException {
 export const ApiKeyOperationErrorCode = {
   NotFound: 'api_key_record_not_found',
   NotRotatable: 'api_key_not_rotatable',
+  PrefixCollision: 'api_key_prefix_collision',
   InvalidTime: 'api_key_invalid_time',
   InvalidInput: 'api_key_invalid_input',
 } as const;
@@ -54,8 +55,8 @@ export type ApiKeyOperationErrorCode =
 export class ApiKeyOperationError extends Error {
   readonly code: ApiKeyOperationErrorCode;
 
-  constructor(code: ApiKeyOperationErrorCode, reason?: string) {
-    super(reason ? `${code}: ${reason}` : code);
+  constructor(code: ApiKeyOperationErrorCode, reason?: string, options?: ErrorOptions) {
+    super(reason ? `${code}: ${reason}` : code, options);
     this.name = 'ApiKeyOperationError';
     this.code = code;
   }

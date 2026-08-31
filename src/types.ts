@@ -194,6 +194,19 @@ export type ApiKeyAuthorizationMetricSink = (
   metric: ApiKeyAuthorizationMetric,
 ) => void | Promise<void>;
 
+export type ApiKeyOperationMetricOperation = 'create' | 'rotate';
+
+export interface ApiKeyOperationMetric {
+  type: 'api_key.operation';
+  operation: ApiKeyOperationMetricOperation;
+  outcome: 'prefix_collision_exhausted';
+  attempts: number;
+}
+
+export type ApiKeyOperationMetricSink = (
+  metric: ApiKeyOperationMetric,
+) => void | Promise<void>;
+
 export interface ApiKeyRequestAuthorizationInput {
   rawKey?: string | null;
   requiredEnvironment?: Environment;

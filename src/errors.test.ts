@@ -57,4 +57,16 @@ describe('ApiKeyOperationError', () => {
 
     expect(err.code).toBe('api_key_invalid_input');
   });
+
+  it('preserves the terminal prefix-collision cause', () => {
+    const cause = new Error('duplicate prefix');
+    const err = new ApiKeyOperationError(
+      ApiKeyOperationErrorCode.PrefixCollision,
+      'unique prefix attempts exhausted',
+      { cause },
+    );
+
+    expect(err.code).toBe('api_key_prefix_collision');
+    expect(err.cause).toBe(cause);
+  });
 });

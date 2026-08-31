@@ -21,6 +21,8 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
   in-memory/custom-storage path installs, typechecks, and runs without `@prisma/client`.
 - Document the minimum persistent NestJS/Prisma/PostgreSQL evidence policy and keep representative
   legacy/modern diagonals instead of expanding to an unbounded Cartesian matrix.
+- Add a low-cardinality `api_key.operation` metric for create/rotate prefix-collision exhaustion,
+  including the fixed three-attempt count and isolated sink-error reporting.
 
 - Add request-aware `authorizeRequest()` and make `ApiKeysGuard` use it for environment, IP, and
   scope policy. Restricted credentials fail closed when no client IP is available, while the
@@ -70,6 +72,9 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
   rejections so they cannot replace the original authentication error or alter auth-failure event
   and verification metric semantics. Observer error-reporting callbacks are also protected from
   producing unhandled rejections.
+- Return the stable `api_key_prefix_collision` `ApiKeyOperationError` from both `create()` and
+  `rotate()` after three duplicate-prefix attempts, preserving the final adapter error as `cause`.
+  Unrelated adapter failures still propagate unchanged.
 
 ### Changed
 

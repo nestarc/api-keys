@@ -307,6 +307,11 @@ Concurrent calls for the same old key are exactly-once: one call returns a repla
 loser throws `ApiKeyOperationError` with `api_key_not_rotatable`. The Prisma adapter enforces this
 with a PostgreSQL transaction and conditional update, so an unlinked replacement is never stored.
 
+Both `create()` and `rotate()` retry a storage-reported prefix collision up to three total attempts.
+If all three collide, they throw the same `ApiKeyOperationError` code
+`api_key_prefix_collision`; its standard `cause` is the final adapter error. Treat the cause as
+internal diagnostic data rather than an HTTP response. Other storage failures are not rewritten.
+
 ### Custom storage rotation contract
 
 Starting with the next pre-1.0 minor release (`0.4.0`), custom `ApiKeyStorage` adapters must make
@@ -534,6 +539,27 @@ successful credential-verification metric plus an authorization denial, but not 
 Metric sink failures are isolated from authentication and authorization. Use lifecycle events
 rather than metric labels when you need per-key audit details.
 
+`onOperationMetric` reports terminal prefix-allocation exhaustion without key identifiers or key
+material. It emits exactly one metric after the third collision for either create or rotate:
+
+```typescript
+ApiKeysModule.forRoot({
+  namespace: 'acme',
+  peppers: { 1: process.env.API_KEY_PEPPER! },
+  storage,
+  onOperationMetric: (metric) => {
+    apiKeyOperationCounter.add(1, {
+      operation: metric.operation,
+      outcome: metric.outcome,
+    });
+  },
+});
+```
+
+The payload is `{ type: 'api_key.operation', operation: 'create' | 'rotate',
+outcome: 'prefix_collision_exhausted', attempts: 3 }`. Sink failures are isolated and can be
+observed through `onOperationMetricError`.
+
 See the [request authorization telemetry ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-request-authorization-telemetry-adr.md)
 for the full missing/credential/denial matrix and compatibility decision.
 
@@ -594,7 +620,8 @@ prefix belongs to a revoked or expired record. Only a caller presenting the vali
 receive `api_key_revoked` or `api_key_expired`.
 
 Operation failures throw `ApiKeyOperationError` with `api_key_record_not_found`,
-`api_key_not_rotatable`, `api_key_invalid_time`, or `api_key_invalid_input`.
+`api_key_not_rotatable`, `api_key_prefix_collision`, `api_key_invalid_time`, or
+`api_key_invalid_input`.
 
 ## Logging
 

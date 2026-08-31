@@ -22,6 +22,7 @@ import {
   copyApiKeyAuthorizationMetric,
   copyApiKeyContext,
   copyApiKeyEvent,
+  copyApiKeyOperationMetric,
   copyApiKeyVerificationMetric,
 } from './payload-copy';
 import { flattenScopes, scopeSatisfies } from './scope-matcher';
@@ -34,6 +35,9 @@ import type {
   ApiKeyEvent,
   ApiKeyEventSink,
   ApiKeyMetricSink,
+  ApiKeyOperationMetric,
+  ApiKeyOperationMetricOperation,
+  ApiKeyOperationMetricSink,
   ApiKeyTtlPolicy,
   ApiKeyRecord,
   ApiKeySummary,
@@ -67,6 +71,8 @@ export interface ApiKeysServiceDeps {
   onMetricError?: (error: unknown, metric: ApiKeyVerificationMetric) => void;
   onAuthorizationMetric?: ApiKeyAuthorizationMetricSink;
   onAuthorizationMetricError?: (error: unknown, metric: ApiKeyAuthorizationMetric) => void;
+  onOperationMetric?: ApiKeyOperationMetricSink;
+  onOperationMetricError?: (error: unknown, metric: ApiKeyOperationMetric) => void;
   emitUsageEvents?: boolean;
   ttlPolicy?: ApiKeyTtlPolicy;
   monotonicClock?: () => number;
@@ -94,6 +100,11 @@ export class ApiKeysService {
     error: unknown,
     metric: ApiKeyAuthorizationMetric,
   ) => void;
+  private readonly onOperationMetric?: ApiKeyOperationMetricSink;
+  private readonly onOperationMetricError?: (
+    error: unknown,
+    metric: ApiKeyOperationMetric,
+  ) => void;
   private readonly emitUsageEvents: boolean;
   private readonly ttlPolicy?: ApiKeyTtlPolicy;
   private readonly monotonicClock: () => number;
@@ -112,6 +123,8 @@ export class ApiKeysService {
     this.onMetricError = deps.onMetricError;
     this.onAuthorizationMetric = deps.onAuthorizationMetric;
     this.onAuthorizationMetricError = deps.onAuthorizationMetricError;
+    this.onOperationMetric = deps.onOperationMetric;
+    this.onOperationMetricError = deps.onOperationMetricError;
     this.emitUsageEvents = deps.emitUsageEvents ?? false;
     this.ttlPolicy = deps.ttlPolicy
       ? {
@@ -171,8 +184,12 @@ export class ApiKeysService {
       try {
         await this.storage.insert(record);
       } catch (error) {
-        if (isDuplicatePrefixError(error) && attempt < ApiKeysService.CREATE_MAX_ATTEMPTS - 1) {
-          continue;
+        if (isDuplicatePrefixError(error)) {
+          if (attempt < ApiKeysService.CREATE_MAX_ATTEMPTS - 1) {
+            continue;
+          }
+
+          throw this.prefixCollisionError('create', error);
         }
 
         throw error;
@@ -545,8 +562,12 @@ export class ApiKeysService {
           );
         }
       } catch (error) {
-        if (isDuplicatePrefixError(error) && attempt < ApiKeysService.CREATE_MAX_ATTEMPTS - 1) {
-          continue;
+        if (isDuplicatePrefixError(error)) {
+          if (attempt < ApiKeysService.CREATE_MAX_ATTEMPTS - 1) {
+            continue;
+          }
+
+          throw this.prefixCollisionError('rotate', error);
         }
 
         throw error;
@@ -772,6 +793,31 @@ export class ApiKeysService {
     return this.onAuthorizationMetricError?.(
       error,
       copyApiKeyAuthorizationMetric(metric),
+    );
+  }
+
+  private prefixCollisionError(
+    operation: ApiKeyOperationMetricOperation,
+    cause: unknown,
+  ): ApiKeyOperationError {
+    const metric: ApiKeyOperationMetric = {
+      type: 'api_key.operation',
+      operation,
+      outcome: 'prefix_collision_exhausted',
+      attempts: ApiKeysService.CREATE_MAX_ATTEMPTS,
+    };
+    if (this.onOperationMetric) {
+      invokeObserver(
+        () => this.onOperationMetric?.(copyApiKeyOperationMetric(metric)),
+        (error) =>
+          this.onOperationMetricError?.(error, copyApiKeyOperationMetric(metric)),
+      );
+    }
+
+    return new ApiKeyOperationError(
+      ApiKeyOperationErrorCode.PrefixCollision,
+      `could not allocate a unique prefix after ${ApiKeysService.CREATE_MAX_ATTEMPTS} attempts`,
+      { cause },
     );
   }
 }

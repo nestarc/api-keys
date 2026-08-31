@@ -12,6 +12,7 @@ import { PrismaApiKeyStorage, type PrismaLike } from '../../src/storage/prisma-s
 import type {
   ApiKeyAuthorizationMetric,
   ApiKeyEvent,
+  ApiKeyOperationMetric,
   ApiKeyRecord,
   ApiKeyVerificationMetric,
 } from '../../src/types';
@@ -42,6 +43,8 @@ function svc(
       error: unknown,
       metric: ApiKeyAuthorizationMetric,
     ) => void;
+    onOperationMetric: (metric: ApiKeyOperationMetric) => void | Promise<void>;
+    onOperationMetricError: (error: unknown, metric: ApiKeyOperationMetric) => void;
     monotonicClock: () => number;
     emitUsageEvents: boolean;
     debounceMs: number;
@@ -73,6 +76,8 @@ function svc(
     onMetricError: overrides.onMetricError,
     onAuthorizationMetric: overrides.onAuthorizationMetric,
     onAuthorizationMetricError: overrides.onAuthorizationMetricError,
+    onOperationMetric: overrides.onOperationMetric,
+    onOperationMetricError: overrides.onOperationMetricError,
     monotonicClock: overrides.monotonicClock,
     emitUsageEvents: overrides.emitUsageEvents,
     ttlPolicy: overrides.ttlPolicy,
@@ -319,6 +324,59 @@ describe('ApiKeysService.create', () => {
 
     expect(insert).toHaveBeenCalledTimes(2);
     expect(result.key).toMatch(/^nk_live_[A-Za-z0-9]{12}_[A-Za-z0-9]{32}$/);
+  });
+
+  it('returns the stable terminal collision contract after exactly three attempts', async () => {
+    const terminalCause = new Error('duplicate prefix: abcdefghijkl');
+    const metricSinkError = new Error('operation metric sink down');
+    const insert = jest.fn().mockRejectedValue(terminalCause);
+    const metrics: ApiKeyOperationMetric[] = [];
+    const metricErrors = jest.fn();
+    const storage: ApiKeyStorage = {
+      insert,
+      findById: jest.fn().mockResolvedValue(null),
+      findByPrefix: jest.fn().mockResolvedValue(null),
+      listByTenant: jest.fn().mockResolvedValue([]),
+      markRevoked: jest.fn().mockResolvedValue(undefined),
+      touchLastUsed: jest.fn().mockResolvedValue(undefined),
+      rotate: jest.fn().mockResolvedValue('not_rotatable'),
+    };
+    const { service } = svc({
+      storage,
+      onOperationMetric: (metric) => {
+        metrics.push({ ...metric });
+        metric.attempts = 999;
+        throw metricSinkError;
+      },
+      onOperationMetricError: metricErrors,
+    });
+
+    const operation = service.create({
+      tenantId: 't1',
+      name: 'collision',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+
+    await expect(operation).rejects.toBeInstanceOf(ApiKeyOperationError);
+    await expect(operation).rejects.toMatchObject({
+      code: 'api_key_prefix_collision',
+      cause: terminalCause,
+    });
+    expect(insert).toHaveBeenCalledTimes(3);
+    expect(metrics).toEqual([
+      {
+        type: 'api_key.operation',
+        operation: 'create',
+        outcome: 'prefix_collision_exhausted',
+        attempts: 3,
+      },
+    ]);
+    expect(metricErrors).toHaveBeenCalledWith(metricSinkError, {
+      type: 'api_key.operation',
+      operation: 'create',
+      outcome: 'prefix_collision_exhausted',
+      attempts: 3,
+    });
   });
 });
 
@@ -580,6 +638,61 @@ describe('ApiKeysService.rotate', () => {
     expect(rotate).toHaveBeenCalledTimes(2);
     expect(rotated.id).toBe('key_3');
     expect(rotated.key).toMatch(/^nk_live_[A-Za-z0-9]{12}_[A-Za-z0-9]{32}$/);
+  });
+
+  it('returns the same terminal collision contract for rotation after three attempts', async () => {
+    const oldRecord: ApiKeyRecord = {
+      id: 'key_1',
+      tenantId: 't1',
+      name: 'old key',
+      environment: 'live',
+      prefix: 'abcdefghijkl',
+      hash: 'f'.repeat(64),
+      pepperVersion: 1,
+      scopes: ['reports:read'],
+      lastUsedAt: null,
+      expiresAt: null,
+      revokedAt: null,
+      rotatedAt: null,
+      replacedByKeyId: null,
+      createdBy: 'user_1',
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    const terminalCause = new Error('duplicate prefix: abcdefghijkl');
+    const rotate = jest.fn().mockRejectedValue(terminalCause);
+    const metrics: ApiKeyOperationMetric[] = [];
+    const storage: ApiKeyStorage = {
+      insert: jest.fn().mockResolvedValue(undefined),
+      findById: jest.fn().mockResolvedValue(oldRecord),
+      findByPrefix: jest.fn().mockResolvedValue(null),
+      listByTenant: jest.fn().mockResolvedValue([]),
+      markRevoked: jest.fn().mockResolvedValue(undefined),
+      touchLastUsed: jest.fn().mockResolvedValue(undefined),
+      rotate,
+    };
+    const { service } = svc({
+      storage,
+      onOperationMetric: (metric) => {
+        metrics.push(metric);
+      },
+    });
+
+    const operation = service.rotate(oldRecord.id);
+
+    await expect(operation).rejects.toBeInstanceOf(ApiKeyOperationError);
+    await expect(operation).rejects.toMatchObject({
+      code: 'api_key_prefix_collision',
+      cause: terminalCause,
+    });
+    expect(rotate).toHaveBeenCalledTimes(3);
+    expect(metrics).toEqual([
+      {
+        type: 'api_key.operation',
+        operation: 'rotate',
+        outcome: 'prefix_collision_exhausted',
+        attempts: 3,
+      },
+    ]);
   });
 
   it('fails fast when a legacy custom storage returns no atomic rotation result', async () => {

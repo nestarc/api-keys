@@ -2,6 +2,7 @@ import type {
   ApiKeyAuthorizationMetric,
   ApiKeyContext,
   ApiKeyEvent,
+  ApiKeyOperationMetric,
   ApiKeyVerificationMetric,
 } from './types';
 
@@ -52,5 +53,9 @@ export function copyApiKeyVerificationMetric(
 export function copyApiKeyAuthorizationMetric(
   metric: ApiKeyAuthorizationMetric,
 ): ApiKeyAuthorizationMetric {
+  return { ...metric };
+}
+
+export function copyApiKeyOperationMetric(metric: ApiKeyOperationMetric): ApiKeyOperationMetric {
   return { ...metric };
 }

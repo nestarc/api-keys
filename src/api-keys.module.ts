@@ -17,6 +17,7 @@ import type {
   ApiKeyAuthorizationMetricSink,
   ApiKeyEventSink,
   ApiKeyMetricSink,
+  ApiKeyOperationMetricSink,
   ApiKeyTtlPolicy,
 } from './types';
 
@@ -39,6 +40,8 @@ export interface ApiKeysModuleOptions {
   onMetricError?: ApiKeysServiceDeps['onMetricError'];
   onAuthorizationMetric?: ApiKeyAuthorizationMetricSink;
   onAuthorizationMetricError?: ApiKeysServiceDeps['onAuthorizationMetricError'];
+  onOperationMetric?: ApiKeyOperationMetricSink;
+  onOperationMetricError?: ApiKeysServiceDeps['onOperationMetricError'];
   emitUsageEvents?: boolean;
   ttlPolicy?: ApiKeyTtlPolicy;
   contextWriter?: ApiKeyContextWriter;
@@ -76,6 +79,8 @@ export class ApiKeysModule {
             onMetricError: options.onMetricError,
             onAuthorizationMetric: options.onAuthorizationMetric,
             onAuthorizationMetricError: options.onAuthorizationMetricError,
+            onOperationMetric: options.onOperationMetric,
+            onOperationMetricError: options.onOperationMetricError,
             emitUsageEvents: options.emitUsageEvents,
             ttlPolicy: options.ttlPolicy,
           }),
