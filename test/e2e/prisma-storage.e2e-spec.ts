@@ -1,5 +1,8 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { ApiKeysService } from '../../src/api-keys.service';
+import { ApiKeyErrorCode } from '../../src/errors';
+import { Sha256Hasher } from '../../src/hasher';
 import { PrismaApiKeyStorage, type PrismaLike } from '../../src/storage/prisma-storage';
 import type { ApiKeyRecord } from '../../src/types';
 import { storageContract } from '../contract/storage-contract';
@@ -127,6 +130,34 @@ describe('PrismaApiKeyStorage PostgreSQL contract', () => {
     const tenantARecords = await storage.listByTenant('tenant_a');
 
     expect(tenantARecords.map((record) => record.id)).toEqual(['tenant_a_key']);
+  });
+
+  it('rejects a credential whose raw environment differs from its stored environment', async () => {
+    const storage = createStorage();
+    const service = new ApiKeysService({
+      storage,
+      hasher: new Sha256Hasher({
+        peppers: { 1: 'prisma-environment-binding-pepper' },
+        currentVersion: 1,
+      }),
+      namespace: 'nk',
+      clock: () => new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const created = await service.create({
+      tenantId: 'tenant_environment_binding',
+      name: 'environment binding',
+      environment: 'test',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+    const tampered = created.key.replace('_test_', '_live_');
+
+    await expect(service.verify(tampered)).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Invalid,
+    });
+    await expect(storage.findById(created.id)).resolves.toMatchObject({
+      environment: 'test',
+      lastUsedAt: null,
+    });
   });
 
   it('returns not_rotatable without creating a key when the old key is missing', async () => {

@@ -1539,6 +1539,62 @@ describe('ApiKeysService.verify', () => {
     expect(context.environment).toBe('live');
   });
 
+  it.each([
+    ['live', 'test'],
+    ['test', 'live'],
+  ] as const)(
+    'rejects a %s credential whose raw environment segment is changed to %s without exposing the stored record',
+    async (storedEnvironment, tamperedEnvironment) => {
+      const events: ApiKeyEvent[] = [];
+      const metrics: ApiKeyVerificationMetric[] = [];
+      const { service, storage } = svc({
+        onEvent: (event) => {
+          events.push(event);
+        },
+        onMetric: (metric) => {
+          metrics.push(metric);
+        },
+      });
+      const created = await service.create({
+        tenantId: 'tenant_environment_binding',
+        name: 'environment binding',
+        environment: storedEnvironment,
+        scopes: [{ resource: 'reports', level: 'read' }],
+      });
+      events.splice(0, events.length);
+
+      const tampered = created.key.replace(
+        `_${storedEnvironment}_`,
+        `_${tamperedEnvironment}_`,
+      );
+
+      await expect(service.verify(tampered)).rejects.toMatchObject({
+        code: ApiKeyErrorCode.Invalid,
+      });
+      const [record] = await storage.listByTenant('tenant_environment_binding');
+      expect(record.lastUsedAt).toBeNull();
+      expect(events).toEqual([
+        {
+          type: 'api_key.auth_failed',
+          at: new Date('2026-01-01T00:00:00.000Z'),
+          prefix: record.prefix,
+          code: ApiKeyErrorCode.Invalid,
+        },
+      ]);
+      expect(metrics).toEqual([
+        expect.objectContaining({
+          type: 'api_key.verification',
+          outcome: 'invalid',
+        }),
+      ]);
+      expect(metrics[0]).not.toHaveProperty('environment');
+      expect(JSON.stringify({ events, metrics })).not.toContain(created.id);
+      expect(JSON.stringify({ events, metrics })).not.toContain(record.tenantId);
+      expect(JSON.stringify({ events, metrics })).not.toContain(storedEnvironment);
+      expect(JSON.stringify({ events, metrics })).not.toContain(created.key);
+    },
+  );
+
   it('fails closed instead of repairing a non-canonical persisted tenant ID', async () => {
     const generated = generateKey({ namespace: 'nk', environment: 'live' });
     const hasher = new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 });

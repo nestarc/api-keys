@@ -168,7 +168,7 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 11 | `AK-M11` | P1 | `DONE` | S | `AK-M08A`, `AK-M08C` | coverage floor와 CI evidence |
 | 12 | `AK-M15` | P2 | `DECISION` | S | 없음 | list의 active/expired/grace semantics 정렬 |
 | 13 | `AK-M12` | P2 | `DONE` | M | 없음; filter 의미 비변경 | public list DTO에서 verifier material 제거 |
-| 14 | `AK-M13` | P2 | `READY` | S | `AK-M04` | raw key environment와 stored environment bind |
+| 14 | `AK-M13` | P2 | `DONE` | S | `AK-M04` | raw key environment와 stored environment bind |
 | 15 | `AK-M16` | P2 | `BLOCKED` | S | `AK-M05` | InMemory storage record Date defensive copy |
 | 16A | `AK-M17A` | P2 | `DECISION` | S | 없음 | `SECURITY.md`와 지원 release policy |
 | 16B | `AK-M17B` | P2 | `EXTERNAL` | S | `AK-M17A` | GitHub reporting/security/ruleset 설정 |
@@ -665,15 +665,24 @@ rotation-grace record를 유지하는 현재 동작은 보존한다. 이 보안 
 
 ### `AK-M13` — environment segment binding
 
-- 상태: `P2 / READY`
+- 상태: `P2 / DONE`
 
 완료 조건:
 
-- [ ] parsed environment와 stored record environment가 다르면 stable invalid 결과로 거부한다.
-- [ ] 정상 live/test 및 route-level environment mismatch 의미를 보존한다.
-- [ ] event/metric은 변조된 credential의 내부 record 정보를 과다 노출하지 않는다.
+- [x] parsed environment와 stored record environment가 다르면 stable invalid 결과로 거부한다.
+- [x] 정상 live/test 및 route-level environment mismatch 의미를 보존한다.
+- [x] event/metric은 변조된 credential의 내부 record 정보를 과다 노출하지 않는다.
 
 검증: service/Guard table, Prisma lane.
+
+완료 결정(2026-08-31): raw credential의 `live|test` segment는 secret 인증 뒤 stored record의
+environment와 일치해야 하는 credential identity로 결합한다. segment만 바꾼 credential은
+`api_key_invalid`로 거부하고 `lastUsedAt`을 갱신하지 않는다. 이 실패의 auth event에는 raw
+credential의 prefix와 stable code만 남기며 tenant ID, key ID, stored environment를 넣지 않고,
+verification/authorization metric에도 environment label을 붙이지 않는다. 정상 live/test key와
+route의 `@RequireEnvironment` 불일치는 기존대로 각각 성공 및
+`api_key_environment_mismatch`(403)를 유지한다. parser는 이미 environment를 검증·반환하므로
+`key-format.ts` 변경 없이 verify binding에서 계약을 완성했다.
 
 ### `AK-M15` — list 상태 의미
 
@@ -991,6 +1000,7 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-30 | `AK-M10` | `DONE` | `2488896` | `2488896 + worktree` (PR/release 없음) | PostgreSQL 14/Prisma 5와 PostgreSQL 16/Prisma 5/6/7 각 20 PASS, no-Prisma strict packed consumer, Nest 10/11 strict+HTTP, profile A/D PASS | `AK-M11` coverage floor |
 | 2026-08-31 | `AK-M11` | `DONE` | `7e1dd16` | `7e1dd16 + worktree` (PR/release 없음) | global 88/84/86/87와 4 critical-file floor PASS, 두 intentional regression exit 1, PostgreSQL/Prisma matrix와 packed consumers PASS | `AK-M15` list 상태 의미 결정 |
 | 2026-08-31 | `AK-M12` | `DONE` | `5747de4` | `5747de4 + worktree` (PR/release 없음) | RED serialization 노출 재현, 12 suites/189 tests, coverage 88.27/84.01/87.17/87.90, Nest 10/11 packed type/runtime PASS, build/pack/bench/audit PASS | `AK-M15` list 상태 의미 결정 |
+| 2026-08-31 | `AK-M13` | `DONE` | `2c93ea5` | `2c93ea5 + worktree` (PR/release 없음) | RED live↔test segment 변조 통과 재현, 12 suites/193 tests, coverage 88.34/84.09/87.17/87.98, PostgreSQL 14/16 + Prisma 5/6/7 각 21 tests, Nest 10/11 HTTP PASS | `AK-M15` list 상태 의미 결정 |
 
 ### AK-M01 종료 인계
 
@@ -1603,6 +1613,43 @@ Unverified paths and reason: remote GitHub CI/release는 push 전이라 미실�
   변경하지 않아 PostgreSQL matrix와 no-Prisma/HTTP consumers는 재실행하지 않았다. 첫 packed
   consumer는 sandbox의 read-only 사용자 npm cache로 EPERM이었고 작업 전용 /tmp cache와 승인된
   registry network에서 exact legacy/modern lane을 모두 통과했다.
+External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
+Next exact action: AK-M15에서 expired/rotated/revoked key의 현재 default list 결과표를 만들고
+  active/expired/grace 제품 계약을 결정한다.
+```
+
+### AK-M13 종료 인계
+
+```text
+Task: AK-M13
+State: DONE
+Start ref / end ref: 2c93ea5 / 2c93ea5 + session worktree (commit·PR·release 없음)
+Changed files: src/api-keys.service.ts, test/integration/api-keys.service.test.ts,
+  test/integration/api-keys.guard.test.ts, test/e2e/prisma-storage.e2e-spec.ts,
+  scripts/test-http-consumer.js, CHANGELOG.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: parsed live/test environment는 secret 인증 뒤 stored environment와 일치해야
+  하는 credential identity다. 불일치는 stable api_key_invalid이고 lastUsedAt을 갱신하지 않는다.
+  변조 실패 event/metric에는 tenant ID, key ID, stored environment를 넣지 않는다. 정상 live/test와
+  route-level environment mismatch의 기존 success/403 의미는 유지한다.
+Commands and exact results:
+  RED: npm test -- --runInBand test/integration/api-keys.service.test.ts
+    -t "raw environment segment" => 2 tests expected FAIL; 두 변조 credential이 stored context로 성공
+  대상 service/Guard environment table => 2 suites, 10 tests PASS
+  npm run lint + tsc --noEmit -p tsconfig.build.json + npm test -- --runInBand => PASS,
+    12 suites/193 tests PASS
+  npm run test:coverage -- --coverageDirectory=/tmp/api-keys-m13-coverage => global
+    88.34/84.09/87.17/87.98, global 및 4 critical-file floor PASS
+  npm run test:e2e:postgres-matrix => PostgreSQL 14/Prisma 5.22.0 및 PostgreSQL 16/
+    Prisma 5.22.0, 6.19.3, 7.10.0 각각 1 suite/21 tests PASS
+  npm run test:consumer:http:nest10 + nest11 => exact Nest 10.4.20/11.2.3 packed default
+    HTTP contract PASS; 변조 segment는 401 api_key_invalid, 실제 route mismatch는 403 유지
+  npm run build + node --check scripts/test-http-consumer.js => PASS
+  npm run bench:smoke => PASS; |unknown-known invalid| p50 0.3µs below 500µs
+  npm audit --omit=dev --json => production vulnerabilities 0
+  git diff --check => PASS after final plan update
+Unverified paths and reason: 변경 head의 remote GitHub CI/release는 push 전이라 미실행했다.
+  ignored test/e2e/generated/prisma-client는 matrix가 exact Prisma 7.10.0으로 마지막 생성했다.
 External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
 Next exact action: AK-M15에서 expired/rotated/revoked key의 현재 default list 결과표를 만들고
   active/expired/grace 제품 계약을 결정한다.

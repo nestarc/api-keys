@@ -30,6 +30,9 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 - Authenticate a known prefix's secret before revealing revoked or expired lifecycle state;
   wrong secrets now consistently fail with `api_key_invalid` while unknown and known-prefix
   failure paths both perform bounded hash/compare work.
+- Bind the raw credential's `live`/`test` segment to the stored key environment after secret
+  authentication. Segment-only tampering now fails with `api_key_invalid` and does not attach the
+  stored tenant, key ID, or environment to failure telemetry.
 - Make `ApiKeyError` a Nest `HttpException` so the default Nest 10/11 HTTP pipeline returns the
   documented 401/403 status and a safe `{ statusCode, code }` response body. The existing
   `instanceof ApiKeyError`, `code`, and `httpStatus` contracts remain supported.

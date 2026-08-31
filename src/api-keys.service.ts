@@ -309,6 +309,12 @@ export class ApiKeysService {
         throw new ApiKeyError(ApiKeyErrorCode.Invalid);
       }
 
+      if (parsedKey.environment !== record.environment) {
+        metricEnvironment = undefined;
+        this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid);
+        throw new ApiKeyError(ApiKeyErrorCode.Invalid);
+      }
+
       if (!isValidTenantId(record.tenantId)) {
         this.reportAuthFailed(parsedKey.prefix, ApiKeyErrorCode.Invalid);
         throw new ApiKeyError(ApiKeyErrorCode.Invalid);

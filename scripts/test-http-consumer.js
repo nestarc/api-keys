@@ -119,10 +119,12 @@ async function main() {
     }
     const baseUrl = 'http://127.0.0.1:' + address.port;
     const unknown = 'http_live_' + 'z'.repeat(12) + '_' + 'z'.repeat(32);
+    const tamperedEnvironment = active.key.replace('_live_', '_test_');
     const cases = [
       ['missing', '/auth', undefined, 401, 'api_key_missing'],
       ['malformed', '/auth', 'garbage', 401, 'api_key_malformed'],
       ['unknown', '/auth', unknown, 401, 'api_key_invalid'],
+      ['tampered environment', '/auth', tamperedEnvironment, 401, 'api_key_invalid'],
       ['wrong secret on revoked prefix', '/auth', wrongSecret(revoked.key), 401, 'api_key_invalid'],
       ['revoked', '/auth', revoked.key, 401, 'api_key_revoked'],
       ['expired', '/auth', expired.key, 401, 'api_key_expired'],

@@ -140,6 +140,37 @@ describe('ApiKeysGuard', () => {
     });
   });
 
+  it.each([
+    ['live', 'test'],
+    ['test', 'live'],
+  ] as const)(
+    'rejects a stored %s key whose raw environment segment is changed to %s before route authorization',
+    async (storedEnvironment, tamperedEnvironment) => {
+      const { guard, service, reflector } = setup();
+      const { key } = await service.create({
+        tenantId: 't1',
+        name: 'environment binding',
+        environment: storedEnvironment,
+        scopes: [{ resource: 'r', level: 'read' }],
+      });
+      jest.spyOn(reflector, 'getAllAndOverride').mockImplementation((metadataKey: unknown) => {
+        return metadataKey === ENVIRONMENT_METADATA ? storedEnvironment : undefined;
+      });
+      const tampered = key.replace(
+        `_${storedEnvironment}_`,
+        `_${tamperedEnvironment}_`,
+      );
+      const executionContext = ctx({ authorization: `Bearer ${tampered}` });
+
+      await expect(guard.canActivate(executionContext)).rejects.toMatchObject({
+        code: ApiKeyErrorCode.Invalid,
+      });
+      expect(executionContext.switchToHttp().getRequest()).not.toHaveProperty(
+        API_KEY_CONTEXT_PROPERTY,
+      );
+    },
+  );
+
   it('runs contextWriter only after scope and environment checks pass', async () => {
     const contextWriter = jest.fn();
     const { guard, service, reflector } = setup({ contextWriter });
