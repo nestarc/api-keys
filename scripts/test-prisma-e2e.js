@@ -4,7 +4,7 @@ const path = require('node:path');
 
 const projectRoot = path.resolve(__dirname, '..');
 const prismaRuntimeRoot = path.resolve(process.env.PRISMA_E2E_RUNTIME_ROOT ?? projectRoot);
-const POSTGRES_IMAGE = 'postgres:16-alpine';
+const DEFAULT_POSTGRES_IMAGE = 'postgres:16-alpine';
 const TEST_DATABASE = 'api_keys_e2e';
 const TEST_PASSWORD = 'postgres';
 const TEST_USER = 'postgres';
@@ -141,7 +141,19 @@ function resolvePrismaRuntime() {
   return { major, version: cliVersion };
 }
 
+function postgresImage() {
+  const image = process.env.PRISMA_E2E_POSTGRES_IMAGE ?? DEFAULT_POSTGRES_IMAGE;
+  if (!/^postgres:(14|16)-alpine$/.test(image)) {
+    throw new Error(
+      'PRISMA_E2E_POSTGRES_IMAGE must be postgres:14-alpine or postgres:16-alpine',
+    );
+  }
+  return image;
+}
+
 function startPostgres() {
+  const image = postgresImage();
+  const expectedMajor = image.match(/^postgres:(14|16)-alpine$/)[1];
   const containerName = `api-keys-prisma-e2e-${process.pid}`;
 
   try {
@@ -168,7 +180,7 @@ function startPostgres() {
     `POSTGRES_DB=${TEST_DATABASE}`,
     '--publish',
     '127.0.0.1::5432',
-    POSTGRES_IMAGE,
+    image,
   ]);
 
   const portOutput = run('docker', ['port', containerName, '5432/tcp'], { capture: true });
@@ -179,12 +191,32 @@ function startPostgres() {
   }
 
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    const ready = spawnSync(
+    const versionResult = spawnSync(
       'docker',
-      ['exec', containerName, 'pg_isready', '--username', TEST_USER, '--dbname', TEST_DATABASE],
-      { stdio: 'ignore' },
+      [
+        'exec',
+        containerName,
+        'psql',
+        '--username',
+        TEST_USER,
+        '--dbname',
+        TEST_DATABASE,
+        '--tuples-only',
+        '--no-align',
+        '--command',
+        'SHOW server_version_num',
+      ],
+      { encoding: 'utf8', stdio: 'pipe' },
     );
-    if (ready.status === 0) {
+    if (versionResult.status === 0) {
+      const serverVersionNumber = (versionResult.stdout ?? '').trim();
+      if (!serverVersionNumber.startsWith(expectedMajor)) {
+        run('docker', ['stop', containerName]);
+        throw new Error(
+          `Expected PostgreSQL ${expectedMajor}, received server_version_num ${serverVersionNumber}`,
+        );
+      }
+      console.log(`Testing PostgreSQL ${expectedMajor} from ${image}`);
       return {
         containerName,
         databaseUrl: `postgresql://${TEST_USER}:${TEST_PASSWORD}@127.0.0.1:${port}/${TEST_DATABASE}?schema=public`,

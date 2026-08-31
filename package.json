@@ -1,15 +1,27 @@
 {
   "name": "@nestarc/api-keys",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Secure, tenant-scoped API keys for NestJS + Prisma. SHA-256 hashed, Stripe-style scopes, and test/live environments.",
   "license": "MIT",
   "author": "nestarc",
   "repository": "github:nestarc/api-keys",
   "engines": {
-    "node": ">=20"
+    "node": "^22.13.0 || ^24.0.0"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./prisma/schema.example.prisma": "./prisma/schema.example.prisma",
+    "./prisma/schema.example.v7.prisma": "./prisma/schema.example.v7.prisma",
+    "./prisma/prisma.config.example.ts": "./prisma/prisma.config.example.ts",
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist",
     "prisma/prisma.config.example.ts",
@@ -21,11 +33,29 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "jest",
+    "test:coverage": "node scripts/test-coverage.js",
     "test:watch": "jest --watch",
     "test:e2e:prisma": "node scripts/test-prisma-e2e.js",
+    "test:e2e:postgres-matrix": "node scripts/test-postgres-matrix.js",
     "test:consumer:strict": "node scripts/test-strict-consumer.js",
     "test:consumer:strict:legacy": "node scripts/test-strict-consumer.js --nest 10.4.20 --prisma 6.19.3",
-    "test:consumer:strict:modern": "node scripts/test-strict-consumer.js --nest 11.2.1 --prisma 7.10.0",
+    "test:consumer:strict:modern": "node scripts/test-strict-consumer.js --nest 11.2.3 --prisma 7.10.0",
+    "test:consumer:strict:nest12": "node scripts/test-strict-consumer.js --nest 12.0.1 --prisma 7.10.0",
+    "test:consumer:http:nest10": "node scripts/test-http-consumer.js --nest 10.4.20",
+    "test:consumer:http:nest11": "node scripts/test-http-consumer.js --nest 11.2.3",
+    "test:consumer:http:nest12": "node scripts/test-http-consumer.js --nest 12.0.1",
+    "test:consumer:no-prisma": "node scripts/test-no-prisma-consumer.js",
+    "test:consumer:module-formats": "node scripts/test-module-format-consumer.js",
+    "test:consumer:storage-contract": "node scripts/test-storage-contract-consumer.js",
+    "test:consumer:rbac": "node scripts/test-rbac-consumer.js",
+    "test:release:candidate": "node scripts/test-package-candidate.js",
+    "test:release:source": "node scripts/test-release-source.js",
+    "test:release:workflow": "node scripts/test-release-workflow.js",
+    "test:audit-policy": "node scripts/test-audit-policy.js",
+    "audit:ci": "node scripts/audit-policy.js",
+    "release:prepare-candidate": "node scripts/package-candidate.js create --directory",
+    "release:verify-candidate": "node scripts/package-candidate.js verify --directory",
+    "release:verify-source": "node scripts/verify-release-source.js",
     "bench": "ts-node bench/api-keys.bench.ts",
     "bench:smoke": "npm run bench -- --iterations 250 --warmup 50 --timing-threshold-ms 0.5",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -33,8 +63,8 @@
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
-    "@nestjs/common": "^10.0.0 || ^11.0.0",
-    "@nestjs/core": "^10.0.0 || ^11.0.0",
+    "@nestjs/common": "^10.0.0 || ^11.0.0 || ^12.0.0",
+    "@nestjs/core": "^10.0.0 || ^11.0.0 || ^12.0.0",
     "@prisma/client": "^5.0.0 || ^6.0.0 || ^7.0.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.0.0"
@@ -45,16 +75,18 @@
     }
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@nestarc/rbac": "^0.2.0",
-    "@nestjs/common": "^10.3.0",
-    "@nestjs/core": "^10.3.0",
-    "@nestjs/testing": "^10.3.0",
+    "@nestjs/common": "~11.2.3",
+    "@nestjs/core": "~11.2.3",
+    "@nestjs/testing": "~11.2.3",
     "@prisma/client": "5.22.0",
     "@types/jest": "^30.0.0",
-    "@types/node": "^20.11.0",
-    "@typescript-eslint/eslint-plugin": "^7.0.0",
-    "@typescript-eslint/parser": "^7.0.0",
-    "eslint": "^8.56.0",
+    "@types/node": "^22.13.0",
+    "@typescript-eslint/eslint-plugin": "^8.68.0",
+    "@typescript-eslint/parser": "^8.68.0",
+    "eslint": "^10.9.1",
+    "globals": "^17.11.0",
     "jest": "^30.4.2",
     "prettier": "^3.2.0",
     "prisma": "5.22.0",

@@ -1,5 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
+const DUMMY_EXPECTED_HASH = '0'.repeat(64);
+
 export interface HashedSecret {
   hash: string;
   pepperVersion: number;
@@ -39,7 +41,8 @@ export class Sha256Hasher {
 
   dummyVerify(secret: string): boolean {
     const pepper = this.options.peppers[this.options.currentVersion];
-    createHash('sha256').update(secret + pepper).digest('hex');
+    const computedHash = createHash('sha256').update(secret + pepper).digest('hex');
+    safeEqualHex(computedHash, DUMMY_EXPECTED_HASH);
     return false;
   }
 }

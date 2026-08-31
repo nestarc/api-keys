@@ -9,20 +9,39 @@ import { getApiKeyContext } from '../../src/context';
 import { CurrentApiKey } from '../../src/decorators/current-api-key.decorator';
 import { ENVIRONMENT_METADATA } from '../../src/decorators/require-environment.decorator';
 import { SCOPE_METADATA } from '../../src/decorators/require-scope.decorator';
+import { ApiKeyErrorCode } from '../../src/errors';
 import { Sha256Hasher } from '../../src/hasher';
 import type { ApiKeyClientIpResolver } from '../../src/ip-allowlist';
 import { InMemoryApiKeyStorage } from '../../src/storage/in-memory-storage';
-import type { ApiKeyContext } from '../../src/types';
+import type {
+  ApiKeyAuthorizationMetric,
+  ApiKeyContext,
+  ApiKeyEvent,
+  ApiKeyVerificationMetric,
+} from '../../src/types';
 
 function setup(
   options: {
     contextWriter?: (apiKey: ApiKeyContext, request: unknown) => void | Promise<void>;
     clientIpResolver?: ApiKeyClientIpResolver;
+    emitUsageEvents?: boolean;
+    onEvent?: (event: ApiKeyEvent) => void;
+    onMetric?: (metric: ApiKeyVerificationMetric) => void;
+    onAuthorizationMetric?: (metric: ApiKeyAuthorizationMetric) => void;
   } = {},
 ) {
   const storage = new InMemoryApiKeyStorage();
   const hasher = new Sha256Hasher({ peppers: { 1: 'p'.repeat(32) }, currentVersion: 1 });
-  const service = new ApiKeysService({ storage, hasher, namespace: 'nk' });
+  const service = new ApiKeysService({
+    storage,
+    hasher,
+    namespace: 'nk',
+    clock: () => new Date('2026-01-01T00:00:00.000Z'),
+    emitUsageEvents: options.emitUsageEvents,
+    onEvent: options.onEvent,
+    onMetric: options.onMetric,
+    onAuthorizationMetric: options.onAuthorizationMetric,
+  });
   const reflector = new Reflector();
   const GuardCtor = ApiKeysGuard as unknown as {
     new (
@@ -121,6 +140,37 @@ describe('ApiKeysGuard', () => {
     });
   });
 
+  it.each([
+    ['live', 'test'],
+    ['test', 'live'],
+  ] as const)(
+    'rejects a stored %s key whose raw environment segment is changed to %s before route authorization',
+    async (storedEnvironment, tamperedEnvironment) => {
+      const { guard, service, reflector } = setup();
+      const { key } = await service.create({
+        tenantId: 't1',
+        name: 'environment binding',
+        environment: storedEnvironment,
+        scopes: [{ resource: 'r', level: 'read' }],
+      });
+      jest.spyOn(reflector, 'getAllAndOverride').mockImplementation((metadataKey: unknown) => {
+        return metadataKey === ENVIRONMENT_METADATA ? storedEnvironment : undefined;
+      });
+      const tampered = key.replace(
+        `_${storedEnvironment}_`,
+        `_${tamperedEnvironment}_`,
+      );
+      const executionContext = ctx({ authorization: `Bearer ${tampered}` });
+
+      await expect(guard.canActivate(executionContext)).rejects.toMatchObject({
+        code: ApiKeyErrorCode.Invalid,
+      });
+      expect(executionContext.switchToHttp().getRequest()).not.toHaveProperty(
+        API_KEY_CONTEXT_PROPERTY,
+      );
+    },
+  );
+
   it('runs contextWriter only after scope and environment checks pass', async () => {
     const contextWriter = jest.fn();
     const { guard, service, reflector } = setup({ contextWriter });
@@ -158,6 +208,62 @@ describe('ApiKeysGuard', () => {
       code: 'api_key_environment_mismatch',
     });
     expect(contextWriter).not.toHaveBeenCalled();
+  });
+
+  it('preserves the verified downstream identity when contextWriter mutates its context and request', async () => {
+    const contextWriter = jest.fn(
+      async (writerContext: ApiKeyContext, request: unknown) => {
+        writerContext.keyId = 'key_attacker';
+        writerContext.tenantId = 'tenant_attacker';
+        writerContext.environment = 'test';
+        writerContext.scopes.splice(0, writerContext.scopes.length, 'admin:write');
+        writerContext.allowedIpCidrs?.splice(
+          0,
+          writerContext.allowedIpCidrs.length,
+          '198.51.100.0/24',
+        );
+        (request as Record<string, unknown>)[API_KEY_CONTEXT_PROPERTY] = {
+          ...writerContext,
+          prefix: 'attackerpref',
+        };
+        await Promise.resolve();
+        writerContext.scopes.push('billing:write');
+      },
+    );
+    const { guard, service, reflector } = setup({ contextWriter });
+    const { id, key } = await service.create({
+      tenantId: 'tenant_verified',
+      name: 'writer isolation',
+      scopes: [{ resource: 'reports', level: 'read' }],
+      allowedIpCidrs: ['203.0.113.0/24'],
+    });
+    jest.spyOn(reflector, 'getAllAndOverride').mockImplementation((metadataKey: unknown) => {
+      return metadataKey === SCOPE_METADATA
+        ? { resource: 'reports', level: 'read' }
+        : undefined;
+    });
+    const executionContext = ctx(
+      { authorization: `Bearer ${key}` },
+      () => undefined,
+      class {},
+      { ip: '203.0.113.42' },
+    );
+
+    await expect(guard.canActivate(executionContext)).resolves.toBe(true);
+
+    const request = executionContext.switchToHttp().getRequest() as Record<string, unknown>;
+    const downstreamContext = getApiKeyContext(request);
+    expect(downstreamContext).toMatchObject({
+      keyId: id,
+      tenantId: 'tenant_verified',
+      environment: 'live',
+      scopes: ['reports:read'],
+      allowedIpCidrs: ['203.0.113.0/24'],
+      prefix: expect.stringMatching(/^[A-Za-z0-9]{12}$/),
+    });
+    expect(downstreamContext?.scopes).not.toContain('admin:write');
+    expect(downstreamContext?.scopes).not.toContain('billing:write');
+    expect(contextWriter.mock.calls[0]?.[0]).not.toBe(downstreamContext);
   });
 
   it('enforces a key IP allowlist using request.ip by default', async () => {
@@ -199,5 +305,88 @@ describe('ApiKeysGuard', () => {
 
     await expect(guard.canActivate(executionContext)).resolves.toBe(true);
     expect(clientIpResolver).toHaveBeenCalledWith(executionContext.switchToHttp().getRequest());
+  });
+
+  it('separates missing and denied Guard telemetry from accepted request usage', async () => {
+    const events: ApiKeyEvent[] = [];
+    const verificationMetrics: ApiKeyVerificationMetric[] = [];
+    const authorizationMetrics: ApiKeyAuthorizationMetric[] = [];
+    const { guard, service, reflector } = setup({
+      emitUsageEvents: true,
+      onEvent: (event) => events.push(event),
+      onMetric: (metric) => verificationMetrics.push(metric),
+      onAuthorizationMetric: (metric) => authorizationMetrics.push(metric),
+    });
+    const { id, key } = await service.create({
+      tenantId: 'tenant_guard_telemetry',
+      name: 'guard telemetry',
+      environment: 'test',
+      scopes: [{ resource: 'reports', level: 'read' }],
+      allowedIpCidrs: ['203.0.113.0/24'],
+    });
+    events.splice(0, events.length);
+
+    await expect(guard.canActivate(ctx({}))).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Missing,
+    });
+
+    jest.spyOn(reflector, 'getAllAndOverride').mockImplementation((metadataKey: unknown) => {
+      return metadataKey === ENVIRONMENT_METADATA ? 'live' : undefined;
+    });
+    await expect(
+      guard.canActivate(ctx({ authorization: `Bearer ${key}` }, undefined, undefined, {
+        ip: '203.0.113.42',
+      })),
+    ).rejects.toMatchObject({ code: ApiKeyErrorCode.EnvironmentMismatch });
+
+    jest.spyOn(reflector, 'getAllAndOverride').mockImplementation(() => undefined);
+    await expect(
+      guard.canActivate(ctx({ authorization: `Bearer ${key}` }, undefined, undefined, {
+        ip: '198.51.100.1',
+      })),
+    ).rejects.toMatchObject({ code: ApiKeyErrorCode.IpNotAllowed });
+
+    jest.spyOn(reflector, 'getAllAndOverride').mockImplementation((metadataKey: unknown) => {
+      return metadataKey === SCOPE_METADATA
+        ? { resource: 'reports', level: 'write' }
+        : undefined;
+    });
+    await expect(
+      guard.canActivate(ctx({ authorization: `Bearer ${key}` }, undefined, undefined, {
+        ip: '203.0.113.42',
+      })),
+    ).rejects.toMatchObject({ code: ApiKeyErrorCode.ScopeInsufficient });
+
+    jest.spyOn(reflector, 'getAllAndOverride').mockImplementation(() => undefined);
+    await expect(
+      guard.canActivate(ctx({ authorization: `Bearer ${key}` }, undefined, undefined, {
+        ip: '203.0.113.42',
+      })),
+    ).resolves.toBe(true);
+
+    const [record] = await service.list('tenant_guard_telemetry');
+    expect(record.id).toBe(id);
+    expect(record.lastUsedAt?.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+    expect(events.map((event) => event.type)).toEqual([
+      'api_key.authorization_denied',
+      'api_key.authorization_denied',
+      'api_key.authorization_denied',
+      'api_key.authorization_denied',
+      'api_key.used',
+    ]);
+    expect(events.filter((event) => event.type === 'api_key.auth_failed')).toHaveLength(0);
+    expect(verificationMetrics.map((metric) => metric.outcome)).toEqual([
+      'success',
+      'success',
+      'success',
+      'success',
+    ]);
+    expect(authorizationMetrics.map((metric) => metric.outcome)).toEqual([
+      'missing',
+      'environment_denied',
+      'ip_denied',
+      'scope_denied',
+      'success',
+    ]);
   });
 });

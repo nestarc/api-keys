@@ -1,14 +1,16 @@
 const { spawnSync } = require('node:child_process');
-const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+const { resolveConsumerCandidate } = require('./package-candidate');
+
 const projectRoot = path.resolve(__dirname, '..');
-const DEFAULT_NEST_VERSION = '11.2.1';
+const DEFAULT_NEST_VERSION = '11.2.3';
 const DEFAULT_PRISMA_VERSION = '7.10.0';
-const EXPECTED_NEST_PEER = '^10.0.0 || ^11.0.0';
+const EXPECTED_NEST_PEER = '^10.0.0 || ^11.0.0 || ^12.0.0';
 const EXPECTED_PRISMA_PEER = '^5.0.0 || ^6.0.0 || ^7.0.0';
+const EXPECTED_NODE_ENGINE = '^22.13.0 || ^24.0.0';
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -42,9 +44,11 @@ function npmConfigEnabled(configName) {
   );
 }
 
-function strictNpmEnv() {
+function strictNpmEnv(tempDir) {
   return {
     ...process.env,
+    npm_config_cache: path.join(tempDir, 'npm-cache'),
+    NPM_CONFIG_CACHE: path.join(tempDir, 'npm-cache'),
     npm_config_force: 'false',
     NPM_CONFIG_FORCE: 'false',
     npm_config_legacy_peer_deps: 'false',
@@ -131,6 +135,61 @@ Module({
     if (context.tenantId !== 'tenant_strict') {
       throw new Error('Nest runtime smoke test lost the API key tenant');
     }
+    const summaries = await apiKeys.list('tenant_strict');
+    const createdSummary = summaries.find((summary) => summary.id === created.id);
+    if (!createdSummary || createdSummary.name !== 'Strict consumer') {
+      throw new Error('Public list summary lost expected management metadata');
+    }
+    const serializedSummaries = JSON.stringify(summaries);
+    if (
+      serializedSummaries.includes('hash') ||
+      serializedSummaries.includes('pepperVersion') ||
+      serializedSummaries.includes(created.key) ||
+      serializedSummaries.includes(created.key.split('_')[3])
+    ) {
+      throw new Error('Public list summary exposed verifier material');
+    }
+    const ipRestricted = await apiKeys.create({
+      tenantId: 'tenant_strict',
+      name: 'Restricted direct consumer',
+      scopes: [{ resource: 'consumer', level: 'read' }],
+      allowedIpCidrs: ['203.0.113.0/24'],
+    });
+    await apiKeys.verify(ipRestricted.key);
+    let missingIpCode;
+    try {
+      await apiKeys.authorizeRequest({ rawKey: ipRestricted.key });
+    } catch (error) {
+      missingIpCode = error?.code;
+    }
+    if (missingIpCode !== 'api_key_ip_not_allowed') {
+      throw new Error('Request-aware verification did not fail closed without a client IP');
+    }
+    const authorizedContext = await apiKeys.authorizeRequest({
+      rawKey: ipRestricted.key,
+      clientIp: '203.0.113.42',
+      requiredEnvironment: 'live',
+      requiredScope: { resource: 'consumer', level: 'read' },
+    });
+    if (authorizedContext.keyId !== ipRestricted.id) {
+      throw new Error('Request-aware verification lost the API key identity');
+    }
+    let crossTenantCode;
+    try {
+      await apiKeys.revokeForTenant('tenant_attacker', created.id);
+    } catch (error) {
+      crossTenantCode = error?.code;
+    }
+    if (crossTenantCode !== 'api_key_record_not_found') {
+      throw new Error('Tenant-bound revoke did not hide the cross-tenant record');
+    }
+    await apiKeys.verify(created.key);
+    const replacement = await apiKeys.rotateForTenant('tenant_strict', created.id);
+    const replacementContext = await apiKeys.verify(replacement.key);
+    if (replacementContext.tenantId !== 'tenant_strict') {
+      throw new Error('Tenant-bound rotation lost the exact tenant');
+    }
+    await apiKeys.revokeForTenant('tenant_strict', replacement.id);
   } finally {
     await app.close();
   }
@@ -146,15 +205,20 @@ function writeTypeScriptConsumer(consumerDir) {
   fs.writeFileSync(
     path.join(consumerDir, 'typecheck.ts'),
     `import {
+  ApiKeyError,
+  ApiKeyErrorCode,
   ApiKeysModule,
   ApiKeysService,
   InMemoryApiKeyStorage,
   PrismaApiKeyStorage,
   createTestKey,
+  type ApiKeyAuthorizationMetric,
   type ApiKeyContext,
+  type ApiKeyRequestAuthorizationInput,
+  type ApiKeySummary,
   type PrismaLike,
 } from '@nestarc/api-keys';
-import type { DynamicModule } from '@nestjs/common';
+import type { DynamicModule, HttpException } from '@nestjs/common' with { 'resolution-mode': 'import' };
 
 const storage = new InMemoryApiKeyStorage();
 const apiKeysModule: DynamicModule = ApiKeysModule.forRoot({
@@ -162,6 +226,7 @@ const apiKeysModule: DynamicModule = ApiKeysModule.forRoot({
   peppers: { 1: 'type-consumer-pepper' },
   storage,
 });
+const apiKeyError: HttpException = new ApiKeyError(ApiKeyErrorCode.Missing);
 const prismaStorage = new PrismaApiKeyStorage({} as PrismaLike);
 
 async function verifyPublicTypes(service: ApiKeysService): Promise<ApiKeyContext> {
@@ -169,9 +234,44 @@ async function verifyPublicTypes(service: ApiKeysService): Promise<ApiKeyContext
   return fixture.context;
 }
 
+async function verifyTenantBoundManagementTypes(service: ApiKeysService): Promise<void> {
+  await service.revokeForTenant('tenant_types', 'key_types');
+  await service.rotateForTenant('tenant_types', 'key_types', { gracePeriodMs: 1_000 });
+}
+
+async function verifyPublicListTypes(service: ApiKeysService): Promise<ApiKeySummary[]> {
+  const summaries = await service.list('tenant_types', { includeRevoked: true });
+  for (const summary of summaries) {
+    void summary.prefix;
+    void summary.expiresAt;
+    // @ts-expect-error Verifier hashes are storage-only and absent from public summaries.
+    void summary.hash;
+    // @ts-expect-error Pepper versions are storage-only and absent from public summaries.
+    void summary.pepperVersion;
+  }
+  return summaries;
+}
+
+async function verifyRequestAuthorizationTypes(
+  service: ApiKeysService,
+  input: ApiKeyRequestAuthorizationInput,
+): Promise<ApiKeyContext> {
+  const metric: ApiKeyAuthorizationMetric = {
+    type: 'api_key.authorization',
+    outcome: 'success',
+    durationMs: 1,
+  };
+  void metric;
+  return service.authorizeRequest(input);
+}
+
 void apiKeysModule;
+void apiKeyError.getStatus();
 void prismaStorage;
 void verifyPublicTypes;
+void verifyTenantBoundManagementTypes;
+void verifyPublicListTypes;
+void verifyRequestAuthorizationTypes;
 `,
   );
   fs.writeFileSync(
@@ -206,25 +306,8 @@ function main() {
   const versions = parseVersions(process.argv.slice(2));
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-keys-strict-consumer-'));
   try {
-    run('npm', ['run', 'build']);
-    const packEntries = JSON.parse(
-      run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', tempDir], {
-        capture: true,
-      }),
-    );
-    const packedArtifact = packEntries[0];
-
-    if (!packedArtifact?.filename || !packedArtifact.integrity || !packedArtifact.version) {
-      throw new Error('npm pack --json did not report filename, version, and integrity');
-    }
-
-    const tarballPath = path.join(tempDir, packedArtifact.filename);
-    const computedIntegrity = `sha512-${createHash('sha512')
-      .update(fs.readFileSync(tarballPath))
-      .digest('base64')}`;
-    if (computedIntegrity !== packedArtifact.integrity) {
-      throw new Error('npm pack integrity does not match the tarball bytes');
-    }
+    const packedArtifact = resolveConsumerCandidate({ tempDirectory: tempDir });
+    const tarballPath = packedArtifact.tarballPath;
     const consumerDir = path.join(tempDir, 'consumer');
     fs.mkdirSync(consumerDir);
     fs.writeFileSync(
@@ -266,7 +349,7 @@ function main() {
       ],
       {
         cwd: consumerDir,
-        env: strictNpmEnv(),
+        env: strictNpmEnv(tempDir),
       },
     );
     run('npm', ['ls', '--depth=0'], { cwd: consumerDir });
@@ -290,6 +373,9 @@ function main() {
         `Packed version ${packedArtifact.version} installed as ${packedPackage.version}`,
       );
     }
+    if (packedPackage.engines?.node !== EXPECTED_NODE_ENGINE) {
+      throw new Error(`Packed engine metadata must be ${EXPECTED_NODE_ENGINE}`);
+    }
 
     const consumerLock = JSON.parse(
       fs.readFileSync(path.join(consumerDir, 'package-lock.json'), 'utf8'),
@@ -305,10 +391,10 @@ function main() {
       throw new Error('Consumer lock integrity does not match npm pack output');
     }
     if (packedPackage.peerDependencies['@nestjs/common'] !== EXPECTED_NEST_PEER) {
-      throw new Error('Packed peer metadata does not declare the verified Nest 10/11 range');
+      throw new Error('Packed peer metadata does not declare the verified Nest 10/11/12 range');
     }
     if (packedPackage.peerDependencies['@nestjs/core'] !== EXPECTED_NEST_PEER) {
-      throw new Error('Packed peer metadata does not declare the verified Nest 10/11 range');
+      throw new Error('Packed peer metadata does not declare the verified Nest 10/11/12 range');
     }
     if (packedPackage.peerDependencies['@prisma/client'] !== EXPECTED_PRISMA_PEER) {
       throw new Error('Packed peer metadata does not declare the verified Prisma 5/6/7 range');

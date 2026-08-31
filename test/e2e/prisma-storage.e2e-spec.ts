@@ -1,5 +1,8 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { ApiKeysService } from '../../src/api-keys.service';
+import { ApiKeyErrorCode } from '../../src/errors';
+import { Sha256Hasher } from '../../src/hasher';
 import { PrismaApiKeyStorage, type PrismaLike } from '../../src/storage/prisma-storage';
 import type { ApiKeyRecord } from '../../src/types';
 import { storageContract } from '../contract/storage-contract';
@@ -129,7 +132,35 @@ describe('PrismaApiKeyStorage PostgreSQL contract', () => {
     expect(tenantARecords.map((record) => record.id)).toEqual(['tenant_a_key']);
   });
 
-  it('rolls back the new key when the old-key update fails during rotation', async () => {
+  it('rejects a credential whose raw environment differs from its stored environment', async () => {
+    const storage = createStorage();
+    const service = new ApiKeysService({
+      storage,
+      hasher: new Sha256Hasher({
+        peppers: { 1: 'prisma-environment-binding-pepper' },
+        currentVersion: 1,
+      }),
+      namespace: 'nk',
+      clock: () => new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const created = await service.create({
+      tenantId: 'tenant_environment_binding',
+      name: 'environment binding',
+      environment: 'test',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+    const tampered = created.key.replace('_test_', '_live_');
+
+    await expect(service.verify(tampered)).rejects.toMatchObject({
+      code: ApiKeyErrorCode.Invalid,
+    });
+    await expect(storage.findById(created.id)).resolves.toMatchObject({
+      environment: 'test',
+      lastUsedAt: null,
+    });
+  });
+
+  it('returns not_rotatable without creating a key when the old key is missing', async () => {
     const storage = createStorage();
     const oldRecord = fixture({ id: 'old_key', prefix: 'oldprefix001' });
     const newRecord = fixture({ id: 'new_key', prefix: 'newprefix001' });
@@ -142,9 +173,30 @@ describe('PrismaApiKeyStorage PostgreSQL contract', () => {
         oldExpiresAt: new Date('2026-02-08T00:00:00Z'),
         rotatedAt: new Date('2026-02-01T00:00:00Z'),
       }),
-    ).rejects.toThrow();
+    ).resolves.toBe('not_rotatable');
 
     await expect(storage.findById(newRecord.id)).resolves.toBeNull();
     await expect(storage.findById(oldRecord.id)).resolves.toEqual(oldRecord);
+  });
+
+  it('rolls back the old-key claim when replacement creation fails', async () => {
+    const storage = createStorage();
+    const oldRecord = fixture({ id: 'old_key', prefix: 'oldprefix001' });
+    const conflictingRecord = fixture({ id: 'conflicting_key', prefix: 'newprefix001' });
+    const newRecord = fixture({ id: 'new_key', prefix: conflictingRecord.prefix });
+    await storage.insert(oldRecord);
+    await storage.insert(conflictingRecord);
+
+    await expect(
+      storage.rotate({
+        oldKeyId: oldRecord.id,
+        newRecord,
+        oldExpiresAt: new Date('2026-02-08T00:00:00Z'),
+        rotatedAt: new Date('2026-02-01T00:00:00Z'),
+      }),
+    ).rejects.toThrow();
+
+    await expect(storage.findById(oldRecord.id)).resolves.toEqual(oldRecord);
+    await expect(storage.findById(newRecord.id)).resolves.toBeNull();
   });
 });

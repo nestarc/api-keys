@@ -5,74 +5,224 @@ on:
     tags:
       - 'v*.*.*'
 
-jobs:
-  verify-prisma:
-    name: prisma storage (Prisma ${{ matrix.prisma }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - prisma: '5.22.0'
-            consumer: ''
-          - prisma: '6.19.3'
-            consumer: 'test:consumer:strict:legacy'
-          - prisma: '7.10.0'
-            consumer: 'test:consumer:strict:modern'
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: api_keys_e2e
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d api_keys_e2e"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      PRISMA_E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/api_keys_e2e?schema=public
-    steps:
-      - uses: actions/checkout@v7
+permissions:
+  contents: read
 
-      - uses: actions/setup-node@v7
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare-release:
+    name: verify source and pack release candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          node-version: '22'
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Fetch canonical main
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - run: npm ci
+
+      - run: npm run audit:ci
+
+      - name: Verify tag ancestry and release versions
+        run: >-
+          npm run release:verify-source --
+          --tag "$GITHUB_REF_NAME"
+          --commit "$GITHUB_SHA"
+          --main-ref refs/remotes/origin/main
+
+      - run: npm run test:release:source
+
+      - run: npm run test:release:workflow
+
+      - run: npm run build
+
+      - name: Pack the release candidate once
+        run: npm run release:prepare-candidate -- "$RUNNER_TEMP/api-keys-release-candidate"
+
+      - name: Upload the exact release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/api-keys-release-candidate
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  verify-coverage:
+    name: coverage floor
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22.13.0'
           package-manager-cache: false
 
       - run: npm ci
 
-      - name: Install matching Prisma CLI and client
-        run: |
-          runtime_root="${RUNNER_TEMP}/api-keys-prisma-${{ matrix.prisma }}"
-          packages=("prisma@${{ matrix.prisma }}" "@prisma/client@${{ matrix.prisma }}")
-          if [[ "${{ matrix.prisma }}" == 7.* ]]; then
-            packages+=("@prisma/adapter-pg@${{ matrix.prisma }}")
-          fi
-          npm install --prefix "$runtime_root" --no-save --package-lock=false "${packages[@]}"
-          echo "PRISMA_E2E_RUNTIME_ROOT=$runtime_root" >> "$GITHUB_ENV"
+      - run: npm run test:coverage
 
-      - run: npm run test:e2e:prisma
+      - name: Upload coverage summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-coverage-summary
+          path: |
+            coverage/coverage-summary.json
+            coverage/coverage-floor.txt
+          if-no-files-found: warn
+          retention-days: 14
 
-      - name: Verify strict tarball consumer
-        if: matrix.consumer != ''
-        run: npm run ${{ matrix.consumer }}
+  verify-http:
+    name: http consumer (Nest ${{ matrix.nest }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: prepare-release
+    env:
+      API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nest: '10.4.20'
+            script: 'test:consumer:http:nest10'
+          - nest: '11.2.3'
+            script: 'test:consumer:http:nest11'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22.13.0'
+          package-manager-cache: false
+
+      - run: npm ci
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/api-keys-release-candidate
+
+      - run: npm run ${{ matrix.script }}
+
+  verify-postgres:
+    name: PostgreSQL 14/16 and Prisma 5/6/7
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22.13.0'
+          package-manager-cache: false
+
+      - run: npm ci
+
+      - run: npm run test:e2e:postgres-matrix
+
+  verify-nest12:
+    name: Nest 12 compatibility (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: prepare-release
+    env:
+      API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.13.0', '24']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+
+      - run: npm ci
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/api-keys-release-candidate
+
+      - run: npm run test:consumer:strict:nest12
+
+      - run: npm run test:consumer:http:nest12
+
+  verify-packed-consumer:
+    name: packed consumer (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: prepare-release
+    env:
+      API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Nest 10 / Prisma 6
+            script: test:consumer:strict:legacy
+          - name: Nest 11 / Prisma 7
+            script: test:consumer:strict:modern
+          - name: Nest 11 / no Prisma
+            script: test:consumer:no-prisma
+          - name: CommonJS / native ESM
+            script: test:consumer:module-formats
+          - name: Custom storage contract
+            script: test:consumer:storage-contract
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22.13.0'
+          package-manager-cache: false
+
+      - run: npm ci
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/api-keys-release-candidate
+
+      - run: npm run ${{ matrix.script }}
 
   publish:
     name: publish to npm
     runs-on: ubuntu-latest
-    needs: verify-prisma
+    timeout-minutes: 20
+    needs:
+      [
+        prepare-release,
+        verify-coverage,
+        verify-postgres,
+        verify-packed-consumer,
+        verify-http,
+        verify-nest12,
+      ]
     environment: npm
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
@@ -84,21 +234,22 @@ jobs:
 
       - run: npm test -- --ci
 
-      - run: npm run build
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/api-keys-release-candidate
 
-      - name: Verify tag matches package.json version
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          pkg="$(node -p "require('./package.json').version")"
-          if [ "$tag" != "$pkg" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg"
-            exit 1
-          fi
+      - name: Verify the candidate artifact bytes
+        id: candidate
+        run: >-
+          npm run release:verify-candidate --
+          "$RUNNER_TEMP/api-keys-release-candidate"
+          --github-output "$GITHUB_OUTPUT"
 
       - name: Resolve npm dist-tag
         id: disttag
         run: |
-          version="$(node -p "require('./package.json').version")"
+          version="${{ steps.candidate.outputs.version }}"
           if [[ "$version" == *-* ]]; then
             echo "tag=next" >> "$GITHUB_OUTPUT"
           else
@@ -106,4 +257,7 @@ jobs:
           fi
 
       - name: Publish
-        run: npm publish --access public --tag "${{ steps.disttag.outputs.tag }}"
+        run: >-
+          npm publish "${{ steps.candidate.outputs.tarball }}"
+          --access public
+          --tag "${{ steps.disttag.outputs.tag }}"

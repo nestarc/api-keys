@@ -1,24 +1,21 @@
-import { CanActivate, ExecutionContext, Inject, Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import type { CanActivate, ExecutionContext } from '@nestjs/common' with {
+  'resolution-mode': 'import',
+};
 import { Reflector } from '@nestjs/core';
+import type { Reflector as ReflectorType } from '@nestjs/core' with {
+  'resolution-mode': 'import',
+};
 import { ApiKeysService } from './api-keys.service';
-import {
-  API_KEY_CONTEXT_PROPERTY,
-  API_KEY_CONTEXT_WRITER,
-  ApiKeyContextWriter,
-} from './context';
+import { API_KEY_CONTEXT_PROPERTY, API_KEY_CONTEXT_WRITER, ApiKeyContextWriter } from './context';
 import { ENVIRONMENT_METADATA } from './decorators/require-environment.decorator';
-import {
-  RequiredScope,
-  SCOPE_METADATA,
-} from './decorators/require-scope.decorator';
-import { ApiKeyError, ApiKeyErrorCode } from './errors';
+import { RequiredScope, SCOPE_METADATA } from './decorators/require-scope.decorator';
 import {
   API_KEY_CLIENT_IP_RESOLVER,
   ApiKeyClientIpResolver,
   defaultApiKeyClientIpResolver,
-  isIpAllowed,
 } from './ip-allowlist';
-import { scopeSatisfies } from './scope-matcher';
+import { copyApiKeyContext } from './payload-copy';
 import type { Environment } from './types';
 
 export { API_KEY_CONTEXT_PROPERTY };
@@ -27,7 +24,8 @@ export { API_KEY_CONTEXT_PROPERTY };
 export class ApiKeysGuard implements CanActivate {
   constructor(
     private readonly service: ApiKeysService,
-    private readonly reflector: Reflector,
+    @Inject(Reflector)
+    private readonly reflector: ReflectorType,
     @Optional()
     @Inject(API_KEY_CONTEXT_WRITER)
     private readonly contextWriter?: ApiKeyContextWriter,
@@ -41,44 +39,30 @@ export class ApiKeysGuard implements CanActivate {
     const header = request.headers as Record<string, string> | undefined;
     const authorization = header?.authorization;
 
-    if (!authorization) {
-      throw new ApiKeyError(ApiKeyErrorCode.Missing);
-    }
-
-    const rawKey = authorization.startsWith('Bearer ')
-      ? authorization.slice('Bearer '.length)
-      : authorization;
-    const apiKeyContext = await this.service.verify(rawKey);
-
     const requiredEnvironment = this.reflector.getAllAndOverride<Environment | undefined>(
       ENVIRONMENT_METADATA,
       [context.getHandler(), context.getClass()],
     );
-    if (requiredEnvironment && apiKeyContext.environment !== requiredEnvironment) {
-      throw new ApiKeyError(ApiKeyErrorCode.EnvironmentMismatch);
-    }
-
-    const allowedIpCidrs = apiKeyContext.allowedIpCidrs ?? [];
-    if (allowedIpCidrs.length > 0) {
-      const clientIp = await (this.clientIpResolver ?? defaultApiKeyClientIpResolver)(request);
-      if (!isIpAllowed(clientIp, allowedIpCidrs)) {
-        throw new ApiKeyError(ApiKeyErrorCode.IpNotAllowed);
-      }
-    }
-
     const requiredScope = this.reflector.getAllAndOverride<RequiredScope | undefined>(
       SCOPE_METADATA,
       [context.getHandler(), context.getClass()],
     );
-    if (
-      requiredScope &&
-      !scopeSatisfies(apiKeyContext.scopes, requiredScope.resource, requiredScope.level)
-    ) {
-      throw new ApiKeyError(ApiKeyErrorCode.ScopeInsufficient);
-    }
+    const rawKey = authorization
+      ? authorization.startsWith('Bearer ')
+        ? authorization.slice('Bearer '.length)
+        : authorization
+      : undefined;
+    const apiKeyContext = await this.service.authorizeRequest({
+      rawKey,
+      requiredEnvironment,
+      requiredScope,
+      request,
+      clientIpResolver: this.clientIpResolver ?? defaultApiKeyClientIpResolver,
+    });
 
-    request[API_KEY_CONTEXT_PROPERTY] = apiKeyContext;
-    await this.contextWriter?.(apiKeyContext, request);
+    request[API_KEY_CONTEXT_PROPERTY] = copyApiKeyContext(apiKeyContext);
+    await this.contextWriter?.(copyApiKeyContext(apiKeyContext), request);
+    request[API_KEY_CONTEXT_PROPERTY] = copyApiKeyContext(apiKeyContext);
     return true;
   }
 }

@@ -1,0 +1,34 @@
+{
+  "global": {
+    "statements": 88,
+    "branches": 84,
+    "functions": 86,
+    "lines": 87
+  },
+  "files": {
+    "src/api-keys.guard.ts": {
+      "statements": 100,
+      "branches": 83,
+      "functions": 100,
+      "lines": 100
+    },
+    "src/api-keys.service.ts": {
+      "statements": 93,
+      "branches": 89,
+      "functions": 100,
+      "lines": 93
+    },
+    "src/errors.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "src/key-format.ts": {
+      "statements": 97,
+      "branches": 92,
+      "functions": 100,
+      "lines": 97
+    }
+  }
+}

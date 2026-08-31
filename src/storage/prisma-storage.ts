@@ -3,16 +3,26 @@ import type {
   ApiKeyStorage,
   ListApiKeysOptions,
   RotateApiKeyStorageInput,
+  RotateApiKeyStorageResult,
+  TenantBoundRevokeApiKeyStorageInput,
+  TenantBoundRevokeApiKeyStorageResult,
+  TenantBoundRotateApiKeyStorageInput,
 } from './api-key-storage.interface';
 
-export interface PrismaLike {
-  apiKey: {
-    create(args: { data: unknown }): Promise<unknown>;
-    findUnique(args: { where: { prefix: string } | { id: string } }): Promise<unknown>;
-    findMany(args: { where: unknown; orderBy?: unknown }): Promise<unknown[]>;
-    update(args: { where: { id: string }; data: unknown }): Promise<unknown>;
-  };
-  $transaction?<T>(operations: Promise<T>[]): Promise<T[]>;
+interface PrismaApiKeyDelegate {
+  create(args: { data: unknown }): Promise<unknown>;
+  findUnique(args: { where: { prefix: string } | { id: string } }): Promise<unknown>;
+  findMany(args: { where: unknown; orderBy?: unknown }): Promise<unknown[]>;
+  update(args: { where: { id: string }; data: unknown }): Promise<unknown>;
+  updateMany(args: { where: unknown; data: unknown }): Promise<{ count: number }>;
+}
+
+export interface PrismaTransactionLike {
+  apiKey: PrismaApiKeyDelegate;
+}
+
+export interface PrismaLike extends PrismaTransactionLike {
+  $transaction<T>(callback: (transaction: PrismaTransactionLike) => Promise<T>): Promise<T>;
 }
 
 export class PrismaApiKeyStorage implements ApiKeyStorage {
@@ -53,7 +63,7 @@ export class PrismaApiKeyStorage implements ApiKeyStorage {
 
     const rows = (await this.prisma.apiKey.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
     })) as ApiKeyRecord[];
 
     return rows.map(mapRow);
@@ -63,28 +73,68 @@ export class PrismaApiKeyStorage implements ApiKeyStorage {
     await this.prisma.apiKey.update({ where: { id }, data: { revokedAt: at } });
   }
 
+  async revokeForTenant(
+    input: TenantBoundRevokeApiKeyStorageInput,
+  ): Promise<TenantBoundRevokeApiKeyStorageResult> {
+    const result = await this.prisma.apiKey.updateMany({
+      where: { id: input.keyId, tenantId: input.expectedTenantId },
+      data: { revokedAt: input.revokedAt },
+    });
+    return result.count === 1 ? 'revoked' : 'not_found';
+  }
+
   async touchLastUsed(id: string, at: Date): Promise<void> {
     await this.prisma.apiKey.update({ where: { id }, data: { lastUsedAt: at } });
   }
 
-  async rotate(input: RotateApiKeyStorageInput): Promise<void> {
-    const createNew = this.prisma.apiKey.create({ data: input.newRecord });
-    const updateOld = this.prisma.apiKey.update({
-      where: { id: input.oldKeyId },
-      data: {
-        expiresAt: input.oldExpiresAt,
-        rotatedAt: input.rotatedAt,
-        replacedByKeyId: input.newRecord.id,
-      },
-    });
+  async rotate(input: RotateApiKeyStorageInput): Promise<RotateApiKeyStorageResult> {
+    return this.rotateMatchingTenant(input);
+  }
 
-    if (this.prisma.$transaction) {
-      await this.prisma.$transaction([createNew, updateOld]);
-      return;
+  async rotateForTenant(
+    input: TenantBoundRotateApiKeyStorageInput,
+  ): Promise<RotateApiKeyStorageResult> {
+    return this.rotateMatchingTenant(input, input.expectedTenantId);
+  }
+
+  private async rotateMatchingTenant(
+    input: RotateApiKeyStorageInput,
+    expectedTenantId?: string,
+  ): Promise<RotateApiKeyStorageResult> {
+    if (expectedTenantId !== undefined && input.newRecord.tenantId !== expectedTenantId) {
+      return 'not_rotatable';
     }
 
-    await createNew;
-    await updateOld;
+    if (typeof this.prisma.$transaction !== 'function') {
+      throw new Error(
+        'PrismaApiKeyStorage.rotate() requires interactive transaction support',
+      );
+    }
+
+    return this.prisma.$transaction(async (transaction) => {
+      const claimed = await transaction.apiKey.updateMany({
+        where: {
+          id: input.oldKeyId,
+          ...(expectedTenantId !== undefined ? { tenantId: expectedTenantId } : {}),
+          revokedAt: null,
+          rotatedAt: null,
+          replacedByKeyId: null,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: input.rotatedAt } }],
+        },
+        data: {
+          expiresAt: input.oldExpiresAt,
+          rotatedAt: input.rotatedAt,
+          replacedByKeyId: input.newRecord.id,
+        },
+      });
+
+      if (claimed.count !== 1) {
+        return 'not_rotatable';
+      }
+
+      await transaction.apiKey.create({ data: input.newRecord });
+      return 'rotated';
+    });
   }
 }
 

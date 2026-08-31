@@ -1,18 +1,25 @@
-import { DynamicModule, Module, Provider } from '@nestjs/common';
+import { Module } from '@nestjs/common';
+import type { DynamicModule, Provider } from '@nestjs/common' with {
+  'resolution-mode': 'import',
+};
 import { ApiKeysGuard } from './api-keys.guard';
 import { ApiKeysService, ApiKeysServiceDeps } from './api-keys.service';
-import {
-  API_KEY_CONTEXT_WRITER,
-  ApiKeyContextWriter,
-} from './context';
+import { API_KEY_CONTEXT_WRITER, ApiKeyContextWriter } from './context';
 import { Sha256Hasher } from './hasher';
 import {
   API_KEY_CLIENT_IP_RESOLVER,
   ApiKeyClientIpResolver,
   defaultApiKeyClientIpResolver,
 } from './ip-allowlist';
+import { validateNamespace } from './input-validation';
 import type { ApiKeyStorage } from './storage/api-key-storage.interface';
-import type { ApiKeyEventSink, ApiKeyMetricSink, ApiKeyTtlPolicy } from './types';
+import type {
+  ApiKeyAuthorizationMetricSink,
+  ApiKeyEventSink,
+  ApiKeyMetricSink,
+  ApiKeyOperationMetricSink,
+  ApiKeyTtlPolicy,
+} from './types';
 
 export const API_KEYS_OPTIONS = Symbol('API_KEYS_OPTIONS');
 export const API_KEYS_STORAGE = Symbol('API_KEYS_STORAGE');
@@ -23,11 +30,18 @@ export interface ApiKeysModuleOptions {
   currentPepperVersion?: number;
   debounceMs?: number;
   storage: ApiKeyStorage;
+  /**
+   * @deprecated Use `onEvent` and handle `api_key.auth_failed` events instead.
+   */
   onAuthFailed?: ApiKeysServiceDeps['onAuthFailed'];
   onEvent?: ApiKeyEventSink;
   onEventError?: ApiKeysServiceDeps['onEventError'];
   onMetric?: ApiKeyMetricSink;
   onMetricError?: ApiKeysServiceDeps['onMetricError'];
+  onAuthorizationMetric?: ApiKeyAuthorizationMetricSink;
+  onAuthorizationMetricError?: ApiKeysServiceDeps['onAuthorizationMetricError'];
+  onOperationMetric?: ApiKeyOperationMetricSink;
+  onOperationMetricError?: ApiKeysServiceDeps['onOperationMetricError'];
   emitUsageEvents?: boolean;
   ttlPolicy?: ApiKeyTtlPolicy;
   contextWriter?: ApiKeyContextWriter;
@@ -37,6 +51,7 @@ export interface ApiKeysModuleOptions {
 @Module({})
 export class ApiKeysModule {
   static forRoot(options: ApiKeysModuleOptions): DynamicModule {
+    const namespace = validateNamespace(options.namespace ?? 'nk');
     const currentPepperVersion = resolveCurrentPepperVersion(options);
     const providers: Provider[] = [
       { provide: API_KEYS_OPTIONS, useValue: options },
@@ -55,13 +70,17 @@ export class ApiKeysModule {
               peppers: options.peppers,
               currentVersion: currentPepperVersion,
             }),
-            namespace: options.namespace ?? 'nk',
+            namespace,
             debounceMs: options.debounceMs,
             onAuthFailed: options.onAuthFailed,
             onEvent: options.onEvent,
             onEventError: options.onEventError,
             onMetric: options.onMetric,
             onMetricError: options.onMetricError,
+            onAuthorizationMetric: options.onAuthorizationMetric,
+            onAuthorizationMetricError: options.onAuthorizationMetricError,
+            onOperationMetric: options.onOperationMetric,
+            onOperationMetricError: options.onOperationMetricError,
             emitUsageEvents: options.emitUsageEvents,
             ttlPolicy: options.ttlPolicy,
           }),
@@ -86,7 +105,9 @@ function resolveCurrentPepperVersion(options: ApiKeysModuleOptions): number {
 
   const currentPepperVersion = options.currentPepperVersion ?? Math.max(...configuredVersions);
   if (!options.peppers[currentPepperVersion]) {
-    throw new Error(`ApiKeysModule current pepper version ${currentPepperVersion} is not configured`);
+    throw new Error(
+      `ApiKeysModule current pepper version ${currentPepperVersion} is not configured`,
+    );
   }
 
   return currentPepperVersion;

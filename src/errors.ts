@@ -1,3 +1,9 @@
+import { HttpException } from '@nestjs/common';
+
+const HttpExceptionBase: typeof import('@nestjs/common', {
+  with: { 'resolution-mode': 'import' },
+}).HttpException = HttpException;
+
 export const ApiKeyErrorCode = {
   Missing: 'api_key_missing',
   Malformed: 'api_key_malformed',
@@ -22,21 +28,29 @@ const HTTP_STATUS: Record<ApiKeyErrorCode, number> = {
   api_key_ip_not_allowed: 403,
 };
 
-export class ApiKeyError extends Error {
+export class ApiKeyError extends HttpExceptionBase {
   readonly code: ApiKeyErrorCode;
+  /**
+   * Backward-compatible status property. Prefer Nest's getStatus() for new code.
+   */
   readonly httpStatus: number;
 
   constructor(code: ApiKeyErrorCode, reason?: string) {
-    super(reason ? `${code}: ${reason}` : code);
+    const httpStatus = HTTP_STATUS[code];
+    super({ statusCode: httpStatus, code }, httpStatus);
     this.name = 'ApiKeyError';
+    this.message = reason ? `${code}: ${reason}` : code;
     this.code = code;
-    this.httpStatus = HTTP_STATUS[code];
+    this.httpStatus = httpStatus;
   }
 }
 
 export const ApiKeyOperationErrorCode = {
   NotFound: 'api_key_record_not_found',
   NotRotatable: 'api_key_not_rotatable',
+  PrefixCollision: 'api_key_prefix_collision',
+  InvalidTime: 'api_key_invalid_time',
+  InvalidInput: 'api_key_invalid_input',
 } as const;
 
 export type ApiKeyOperationErrorCode =
@@ -45,8 +59,8 @@ export type ApiKeyOperationErrorCode =
 export class ApiKeyOperationError extends Error {
   readonly code: ApiKeyOperationErrorCode;
 
-  constructor(code: ApiKeyOperationErrorCode, reason?: string) {
-    super(reason ? `${code}: ${reason}` : code);
+  constructor(code: ApiKeyOperationErrorCode, reason?: string, options?: ErrorOptions) {
+    super(reason ? `${code}: ${reason}` : code, options);
     this.name = 'ApiKeyOperationError';
     this.code = code;
   }
