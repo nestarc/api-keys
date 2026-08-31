@@ -341,11 +341,38 @@ values or `null`.
 ```typescript
 await apiKeys.revoke(keyId); // soft-delete: sets revokedAt, verification returns api_key_revoked
 await apiKeys.revokeForTenant(callerTenantId, keyId); // tenant-bound management path
-const active = await apiKeys.list('tenant_123'); // active keys only
-const all = await apiKeys.list('tenant_123', { includeRevoked: true });
+const current = await apiKeys.list('tenant_123'); // non-revoked keys
+const history = await apiKeys.list('tenant_123', { includeRevoked: true });
 ```
 
-Revoked keys remain in storage so you can audit historical usage. Use revocation, not grace rotation, when a key is known to be compromised.
+`list()` returns `ApiKeySummary[]`, a serialization-safe management projection. It contains key
+metadata such as the ID, name, prefix, scopes, lifecycle timestamps, and creator, but never the
+stored hash, pepper version, or raw secret. The internal `ApiKeyRecord` storage contract still
+contains verifier material so verification and rotation continue to work; do not return
+`storage.listByTenant()` directly from a controller.
+
+The default currently excludes revoked records but retains expired records and old rotation records
+during their grace period. `includeRevoked: true` adds revoked history. Revoked keys remain in
+storage so you can audit historical usage. Use revocation, not grace rotation, when a key is known
+to be compromised.
+
+A tenant-bound management controller can safely return the service projection directly:
+
+```typescript
+@Controller('api-keys')
+export class ApiKeyManagementController {
+  constructor(private readonly apiKeys: ApiKeysService) {}
+
+  @Get()
+  list(@CurrentApiKey() caller: ApiKeyContext): Promise<ApiKeySummary[]> {
+    return this.apiKeys.list(caller.tenantId);
+  }
+}
+```
+
+The `ApiKeyRecord[]` to `ApiKeySummary[]` return-type narrowing is planned for the pre-1.0 `0.4.0`
+release. Consumers that read verifier fields from `list()` must remove that usage; custom storage
+implementations continue to use `ApiKeyRecord` internally.
 
 ## Lifecycle events
 

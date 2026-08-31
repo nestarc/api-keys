@@ -132,6 +132,20 @@ Module({
     if (context.tenantId !== 'tenant_strict') {
       throw new Error('Nest runtime smoke test lost the API key tenant');
     }
+    const summaries = await apiKeys.list('tenant_strict');
+    const createdSummary = summaries.find((summary) => summary.id === created.id);
+    if (!createdSummary || createdSummary.name !== 'Strict consumer') {
+      throw new Error('Public list summary lost expected management metadata');
+    }
+    const serializedSummaries = JSON.stringify(summaries);
+    if (
+      serializedSummaries.includes('hash') ||
+      serializedSummaries.includes('pepperVersion') ||
+      serializedSummaries.includes(created.key) ||
+      serializedSummaries.includes(created.key.split('_')[3])
+    ) {
+      throw new Error('Public list summary exposed verifier material');
+    }
     const ipRestricted = await apiKeys.create({
       tenantId: 'tenant_strict',
       name: 'Restricted direct consumer',
@@ -196,6 +210,7 @@ function writeTypeScriptConsumer(consumerDir) {
   type ApiKeyAuthorizationMetric,
   type ApiKeyContext,
   type ApiKeyRequestAuthorizationInput,
+  type ApiKeySummary,
   type PrismaLike,
 } from '@nestarc/api-keys';
 import type { DynamicModule } from '@nestjs/common';
@@ -218,6 +233,19 @@ async function verifyTenantBoundManagementTypes(service: ApiKeysService): Promis
   await service.rotateForTenant('tenant_types', 'key_types', { gracePeriodMs: 1_000 });
 }
 
+async function verifyPublicListTypes(service: ApiKeysService): Promise<ApiKeySummary[]> {
+  const summaries = await service.list('tenant_types', { includeRevoked: true });
+  for (const summary of summaries) {
+    void summary.prefix;
+    void summary.expiresAt;
+    // @ts-expect-error Verifier hashes are storage-only and absent from public summaries.
+    void summary.hash;
+    // @ts-expect-error Pepper versions are storage-only and absent from public summaries.
+    void summary.pepperVersion;
+  }
+  return summaries;
+}
+
 async function verifyRequestAuthorizationTypes(
   service: ApiKeysService,
   input: ApiKeyRequestAuthorizationInput,
@@ -235,6 +263,7 @@ void apiKeysModule;
 void prismaStorage;
 void verifyPublicTypes;
 void verifyTenantBoundManagementTypes;
+void verifyPublicListTypes;
 void verifyRequestAuthorizationTypes;
 `,
   );

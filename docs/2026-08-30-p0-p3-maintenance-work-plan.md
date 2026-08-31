@@ -167,7 +167,7 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 10 | `AK-M10` | P1 | `DONE` | L | `AK-M09` | Nest/Prisma/PostgreSQL/no-Prisma compatibility 증거 정책 고정 |
 | 11 | `AK-M11` | P1 | `DONE` | S | `AK-M08A`, `AK-M08C` | coverage floor와 CI evidence |
 | 12 | `AK-M15` | P2 | `DECISION` | S | 없음 | list의 active/expired/grace semantics 정렬 |
-| 13 | `AK-M12` | P2 | `BLOCKED` | M | `AK-M15` | public list DTO에서 verifier material 제거 |
+| 13 | `AK-M12` | P2 | `DONE` | M | 없음; filter 의미 비변경 | public list DTO에서 verifier material 제거 |
 | 14 | `AK-M13` | P2 | `READY` | S | `AK-M04` | raw key environment와 stored environment bind |
 | 15 | `AK-M16` | P2 | `BLOCKED` | S | `AK-M05` | InMemory storage record Date defensive copy |
 | 16A | `AK-M17A` | P2 | `DECISION` | S | 없음 | `SECURITY.md`와 지원 release policy |
@@ -204,7 +204,7 @@ P0는 `AK-M01`과 `AK-M02`를 서로 다른 PR로 진행한다. 어느 하나의
 | `AK-M10` | CI matrix, DB/consumer scripts, README | Nest 10/11, Prisma 5/6/7, PostgreSQL 14/16, Prisma 미설치 선언/증거 표를 만들고 최소 지속 lane을 선택한다. |
 | `AK-M11` | Jest config/workflow | fresh full coverage와 실DB adapter gate의 책임을 분리한 threshold 제안을 먼저 기록한다. |
 | `AK-M15` | storage list options, service, README | expired/rotated/revoked key의 현재 default list 결과를 표로 만들고 제품 계약을 선택한다. |
-| `AK-M12` | types, `list()`, docs | `AK-M15`의 상태 계약 위에서 현재 `JSON.stringify(await list())`에 verifier field가 포함되는 regression test를 추가한다. |
+| `AK-M12` | types, `list()`, docs | 현재 `JSON.stringify(await list())`에 verifier field가 포함되는 regression test를 추가하고 기존 filter 의미는 바꾸지 않는다. |
 | `AK-M13` | `key-format.ts`, verify | raw key의 environment segment만 바뀐 credential을 거부하는 failing test를 추가한다. |
 | `AK-M16` | InMemory clone/storage contract | 반환 record의 Date를 mutate해 저장 상태가 변하는 failing test를 추가한다. |
 | `AK-M17A` | `SECURITY.md` | 비공개 신고 채널과 지원 release line을 관리자와 확정하고 문서 초안을 만든다. |
@@ -637,20 +637,31 @@ coverage 수치를 올리기 위한 제품 무관 테스트는 추가하지 않�
 
 ### `AK-M12` — safe public list projection
 
-- 상태: `P2 / BLOCKED (AK-M15)`
+- 상태: `P2 / DONE`
 - 문제: `list()`가 storage record를 그대로 반환해 `hash`와 `pepperVersion`이 public enumerable field가 된다.
 
 완료 조건:
 
-- [ ] `ApiKeySummary` 같은 public projection을 도입해 verifier material을 제외한다.
-- [ ] serialized list에 hash, pepper version, raw secret이 없다.
-- [ ] internal storage record와 rotation/verification 기능은 유지된다.
-- [ ] 기존 반환 type 변경의 semver/compatibility path를 기록한다.
-- [ ] 관리 controller가 그대로 반환해도 최소 안전 필드만 노출되는 예제를 제공한다.
+- [x] `ApiKeySummary` 같은 public projection을 도입해 verifier material을 제외한다.
+- [x] serialized list에 hash, pepper version, raw secret이 없다.
+- [x] internal storage record와 rotation/verification 기능은 유지된다.
+- [x] 기존 반환 type 변경의 semver/compatibility path를 기록한다.
+- [x] 관리 controller가 그대로 반환해도 최소 안전 필드만 노출되는 예제를 제공한다.
 
 검증: serialization, type declaration, packed consumer tests.
 
 비범위: storage interface 비공개화, 관리 UI.
+
+완료 결정(2026-08-31): `ApiKeysService.list()`는 storage의 `ApiKeyRecord[]`를 명시적인
+`ApiKeySummary[]`로 projection해 반환한다. summary에는 관리 metadata와 lifecycle timestamp만
+포함하고 `hash`/`pepperVersion`은 runtime enumerable field와 public declaration 모두에서 제외한다.
+scopes/IP 배열과 Date는 새 객체로 복사하며 storage interface와 verifier/rotation record는 변경하지
+않았다. 기존 `includeRevoked` query를 그대로 전달하므로 default가 revoked만 제외하고 expired 및
+rotation-grace record를 유지하는 현재 동작은 보존한다. 이 보안 projection은 filter 정책 선택과
+독립적이므로 `AK-M15` 선행을 해제했고, active/expired/grace 의미 결정은 여전히 별도 `DECISION`으로
+남긴다. 공개 반환 type narrowing은 계획된 pre-1.0 `0.4.0` breaking change이며 storage adapter의
+`ApiKeyRecord` 계약은 유지한다. README에는 tenant-bound controller가 service 결과를 직접 반환하는
+예제와 storage 결과를 직접 노출하지 말라는 경계를 추가했다.
 
 ### `AK-M13` — environment segment binding
 
@@ -935,6 +946,7 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 - [x] `AK-M09`: exact Node 22.13.0 minimum/Node 24 source lanes와 minimum DB/consumer gates
 - [x] `AK-M10`: PostgreSQL 14/16와 no-Prisma packed consumer
 - [x] `AK-M11`: fresh coverage threshold
+- [x] `AK-M12`: serialized public summary와 packed declaration/runtime verifier-material exclusion
 - [ ] `AK-M18`: main ancestry와 consumer-verified exact tarball identity
 - [ ] `AK-M20B`: public storage contract 또는 corrected documentation packed test
 
@@ -978,6 +990,7 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-30 | `AK-M09` | `DONE` | `fa4093f` | `fa4093f + worktree` (PR/release 없음) | exact Node 22.13.0/24.11.1 A/B/C/D, 각 12 suites/188 tests와 coverage 88.23/84.10/86.95/87.86, Prisma 5/6/7 각 20, Nest 10/11 strict+HTTP, audits 0 | `AK-M10` compatibility 증거 정책 |
 | 2026-08-30 | `AK-M10` | `DONE` | `2488896` | `2488896 + worktree` (PR/release 없음) | PostgreSQL 14/Prisma 5와 PostgreSQL 16/Prisma 5/6/7 각 20 PASS, no-Prisma strict packed consumer, Nest 10/11 strict+HTTP, profile A/D PASS | `AK-M11` coverage floor |
 | 2026-08-31 | `AK-M11` | `DONE` | `7e1dd16` | `7e1dd16 + worktree` (PR/release 없음) | global 88/84/86/87와 4 critical-file floor PASS, 두 intentional regression exit 1, PostgreSQL/Prisma matrix와 packed consumers PASS | `AK-M15` list 상태 의미 결정 |
+| 2026-08-31 | `AK-M12` | `DONE` | `5747de4` | `5747de4 + worktree` (PR/release 없음) | RED serialization 노출 재현, 12 suites/189 tests, coverage 88.27/84.01/87.17/87.90, Nest 10/11 packed type/runtime PASS, build/pack/bench/audit PASS | `AK-M15` list 상태 의미 결정 |
 
 ### AK-M01 종료 인계
 
@@ -1550,6 +1563,46 @@ Commands and exact results:
 Unverified paths and reason: 변경 head의 remote GitHub CI/release와 실제 artifact upload는 push 전이라
   미실행했다. 로컬에서 workflow와 동일한 coverage/DB/consumer commands와 artifact 입력 파일 생성을
   검증했다. ignored test/e2e/generated/prisma-client는 matrix가 exact Prisma 7.10.0으로 마지막 생성했다.
+External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
+Next exact action: AK-M15에서 expired/rotated/revoked key의 현재 default list 결과표를 만들고
+  active/expired/grace 제품 계약을 결정한다.
+```
+
+### AK-M12 종료 인계
+
+```text
+Task: AK-M12
+State: DONE
+Start ref / end ref: 5747de4 / 5747de4 + session worktree (commit·PR·release 없음)
+Changed files: src/types.ts, src/api-keys.service.ts,
+  test/integration/api-keys.service.test.ts, scripts/test-strict-consumer.js, README.md,
+  CHANGELOG.md, docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: list()는 storage ApiKeyRecord[]를 explicit ApiKeySummary[]로 projection해
+  hash/pepperVersion을 runtime과 declaration에서 제외한다. storage/verification/rotation 계약과
+  includeRevoked filter는 그대로 유지한다. M12는 filter 정책과 독립적으로 완료하며 M15의
+  active/expired/grace 결정은 별도 DECISION으로 남긴다. public return type narrowing은 계획된
+  pre-1.0 0.4.0 breaking change다.
+Commands and exact results:
+  RED: npm test -- --runInBand test/integration/api-keys.service.test.ts
+    -t "serialization-safe public summary" => expected FAIL; hash와 pepperVersion 두 field 노출
+  npm run lint + tsc --noEmit + npm test -- --runInBand => PASS, 12 suites/189 tests
+  npm run test:coverage -- --coverageDirectory=/tmp/api-keys-m12-coverage.3sM9bv =>
+    global statements 88.27%, branches 84.01%, functions 87.17%, lines 87.90%;
+    global 및 4 critical-file floor PASS
+  NPM_CONFIG_CACHE=/tmp/api-keys-m12-npm-cache npm run test:consumer:strict:legacy =>
+    exact Nest 10.4.20/Prisma 6.19.3 packed declaration/runtime PASS
+  NPM_CONFIG_CACHE=/tmp/api-keys-m12-npm-cache npm run test:consumer:strict:modern =>
+    exact Nest 11.2.3/Prisma 7.10.0 packed declaration/runtime PASS
+  npm run build => PASS
+  npm pack --dry-run --json --cache /tmp/api-keys-m12-pack-cache => 48 entries,
+    sha512-UwsNLIHkZt6C/IMofQR0D+zweEvfyOI4jvNJvae52OG7TxSwUkKR3yRkwHa943c/jcEdTmCIWaME+6YEB2Ekkg==
+  npm run bench:smoke => PASS; |unknown-known invalid| p50 0.7µs below 500µs
+  npm audit --omit=dev --json => production vulnerabilities 0
+  git diff --check => PASS
+Unverified paths and reason: remote GitHub CI/release는 push 전이라 미실행. storage/schema/filter를
+  변경하지 않아 PostgreSQL matrix와 no-Prisma/HTTP consumers는 재실행하지 않았다. 첫 packed
+  consumer는 sandbox의 read-only 사용자 npm cache로 EPERM이었고 작업 전용 /tmp cache와 승인된
+  registry network에서 exact legacy/modern lane을 모두 통과했다.
 External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
 Next exact action: AK-M15에서 expired/rotated/revoked key의 현재 default list 결과표를 만들고
   active/expired/grace 제품 계약을 결정한다.

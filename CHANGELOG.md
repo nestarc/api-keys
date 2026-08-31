@@ -62,6 +62,11 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ### Changed
 
+- **Breaking in the planned pre-1.0 `0.4.0` release:** `ApiKeysService.list()` now returns
+  serialization-safe `ApiKeySummary[]` values instead of internal `ApiKeyRecord[]` values. Hashes
+  and pepper versions remain available to storage adapters for verification and rotation but are
+  no longer enumerable or declared on the public management projection. Consumers must stop
+  reading verifier material from `list()`; custom `ApiKeyStorage` implementations are unchanged.
 - **Breaking in the planned pre-1.0 `0.4.0` release:** support Node.js `^22.13.0 || ^24.0.0` and
   move the source matrix to the exact Node 22.13.0 minimum plus Node 24. Node 20 users must upgrade
   their application runtime before upgrading this package. Unlisted future Node majors, including

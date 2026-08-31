@@ -1777,6 +1777,45 @@ describe('ApiKeysService.verify', () => {
 });
 
 describe('ApiKeysService.list and revoke', () => {
+  it('returns a serialization-safe public summary without verifier material', async () => {
+    const { service, storage } = svc();
+    const created = await service.create({
+      tenantId: 't1',
+      name: 'public summary',
+      scopes: [{ resource: 'reports', level: 'read' }],
+    });
+    const stored = await storage.findById(created.id);
+
+    expect(stored).not.toBeNull();
+
+    const listed = await service.list('t1');
+    const serialized = JSON.stringify(listed);
+    const publicFields = Object.keys(listed[0]).sort();
+
+    expect(publicFields).toEqual(
+      [
+        'allowedIpCidrs',
+        'createdAt',
+        'createdBy',
+        'environment',
+        'expiresAt',
+        'id',
+        'lastUsedAt',
+        'name',
+        'prefix',
+        'replacedByKeyId',
+        'revokedAt',
+        'rotatedAt',
+        'scopes',
+        'tenantId',
+      ].sort(),
+    );
+    expect(serialized).not.toContain(created.key);
+    expect(serialized).not.toContain(created.key.split('_')[3]);
+    expect(serialized).not.toContain(stored!.hash);
+    expect(serialized).not.toContain('pepperVersion');
+  });
+
   it('list excludes revoked by default', async () => {
     const { service } = svc();
     const first = await service.create({

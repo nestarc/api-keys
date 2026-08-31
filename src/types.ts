@@ -28,6 +28,28 @@ export interface ApiKeyRecord {
   createdAt: Date;
 }
 
+/**
+ * Serialization-safe API key metadata returned by {@link ApiKeysService.list}.
+ *
+ * Verifier material is intentionally available only on internal storage records.
+ */
+export interface ApiKeySummary {
+  id: string;
+  tenantId: string;
+  name: string;
+  environment: Environment;
+  prefix: string;
+  scopes: string[];
+  allowedIpCidrs?: string[];
+  lastUsedAt: Date | null;
+  expiresAt: Date | null;
+  revokedAt: Date | null;
+  rotatedAt: Date | null;
+  replacedByKeyId: string | null;
+  createdBy: string | null;
+  createdAt: Date;
+}
+
 export interface ApiKeyContext {
   keyId: string;
   tenantId: string;

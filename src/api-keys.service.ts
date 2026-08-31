@@ -36,6 +36,7 @@ import type {
   ApiKeyMetricSink,
   ApiKeyTtlPolicy,
   ApiKeyRecord,
+  ApiKeySummary,
   ApiKeyVerificationMetric,
   ApiKeyVerificationOutcome,
   ApiKeyRequestAuthorizationInput,
@@ -573,7 +574,7 @@ export class ApiKeysService {
   async list(
     tenantId: string,
     opts: { includeRevoked?: boolean } = {},
-  ): Promise<ApiKeyRecord[]> {
+  ): Promise<ApiKeySummary[]> {
     const canonicalTenantId = validateTenantId(tenantId);
     const records = await this.storage.listByTenant(canonicalTenantId, opts);
     for (const record of records) {
@@ -584,7 +585,7 @@ export class ApiKeysService {
         );
       }
     }
-    return records;
+    return records.map(toApiKeySummary);
   }
 
   private async scheduleTouch(record: ApiKeyRecord): Promise<void> {
@@ -770,6 +771,31 @@ export class ApiKeysService {
       copyApiKeyAuthorizationMetric(metric),
     );
   }
+}
+
+function toApiKeySummary(record: ApiKeyRecord): ApiKeySummary {
+  return {
+    id: record.id,
+    tenantId: record.tenantId,
+    name: record.name,
+    environment: record.environment,
+    prefix: record.prefix,
+    scopes: [...record.scopes],
+    ...(record.allowedIpCidrs
+      ? { allowedIpCidrs: [...record.allowedIpCidrs] }
+      : {}),
+    lastUsedAt: copyNullableDate(record.lastUsedAt),
+    expiresAt: copyNullableDate(record.expiresAt),
+    revokedAt: copyNullableDate(record.revokedAt),
+    rotatedAt: copyNullableDate(record.rotatedAt),
+    replacedByKeyId: record.replacedByKeyId,
+    createdBy: record.createdBy,
+    createdAt: new Date(record.createdAt.getTime()),
+  };
+}
+
+function copyNullableDate(value: Date | null): Date | null {
+  return value === null ? null : new Date(value.getTime());
 }
 
 function invokeObserver(
