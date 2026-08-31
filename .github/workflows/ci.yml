@@ -35,35 +35,9 @@ jobs:
 
       - run: npm run bench:smoke
 
-  prisma-storage:
-    name: prisma storage (Prisma ${{ matrix.prisma }})
+  postgres-compatibility:
+    name: PostgreSQL 14/16 and Prisma 5/6/7
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - prisma: '5.22.0'
-            consumer: ''
-          - prisma: '6.19.3'
-            consumer: 'test:consumer:strict:legacy'
-          - prisma: '7.10.0'
-            consumer: 'test:consumer:strict:modern'
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: api_keys_e2e
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d api_keys_e2e"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      PRISMA_E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/api_keys_e2e?schema=public
     steps:
       - uses: actions/checkout@v7
 
@@ -74,21 +48,32 @@ jobs:
 
       - run: npm ci
 
-      - name: Install matching Prisma CLI and client
-        run: |
-          runtime_root="${RUNNER_TEMP}/api-keys-prisma-${{ matrix.prisma }}"
-          packages=("prisma@${{ matrix.prisma }}" "@prisma/client@${{ matrix.prisma }}")
-          if [[ "${{ matrix.prisma }}" == 7.* ]]; then
-            packages+=("@prisma/adapter-pg@${{ matrix.prisma }}")
-          fi
-          npm install --prefix "$runtime_root" --no-save --package-lock=false "${packages[@]}"
-          echo "PRISMA_E2E_RUNTIME_ROOT=$runtime_root" >> "$GITHUB_ENV"
+      - run: npm run test:e2e:postgres-matrix
 
-      - run: npm run test:e2e:prisma
+  packed-consumer:
+    name: packed consumer (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Nest 10 / Prisma 6
+            script: test:consumer:strict:legacy
+          - name: Nest 11 / Prisma 7
+            script: test:consumer:strict:modern
+          - name: Nest 11 / no Prisma
+            script: test:consumer:no-prisma
+    steps:
+      - uses: actions/checkout@v7
 
-      - name: Verify strict tarball consumer
-        if: matrix.consumer != ''
-        run: npm run ${{ matrix.consumer }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.13.0'
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run ${{ matrix.script }}
 
   http-consumer:
     name: http consumer (Nest ${{ matrix.nest }})

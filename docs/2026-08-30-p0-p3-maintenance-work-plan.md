@@ -120,8 +120,9 @@ M  docs/prisma-peer-compatibility-plan-2026-08-23.md
 | 축 | 공개 선언 | 현재 자동 증거 | 남은 결정 |
 | --- | --- | --- | --- |
 | Node | `^22.13.0 || ^24.0.0` | source exact Node 22.13.0/Node 24, DB·consumer Node 22.13.0, publish Node 24 | Node 26 등 새 major는 명시적 matrix 검증 뒤 추가 |
-| NestJS | 10/11 | 전체 suite/dev baseline은 Nest 11.2.3, Nest 10.4.20은 packed strict/HTTP consumer | 두 major의 검증 깊이 정책 |
-| Prisma | 5/6/7 optional | 각 major PostgreSQL contract, 6/7 strict consumers | off-diagonal 조합을 전부 검증할지 정책화 |
+| NestJS | 10/11 | Nest 11.2.3 full source suite+strict/HTTP, Nest 10.4.20 strict/HTTP | Nest 12는 `AK-M23` evidence 뒤 결정 |
+| Prisma | 5/6/7 optional | 각 major PostgreSQL 16 contract, 6/7 대표 strict consumers, no-Prisma root consumer | 결합 변경/실패 때만 targeted off-diagonal 추가 |
+| PostgreSQL | 14+ | Prisma 5 + PostgreSQL 14 boundary, Prisma 5/6/7 + PostgreSQL 16 current | 새 하한/상한은 real DB evidence 뒤 변경 |
 | module format | CommonJS `main/types` | 현재 tarball consumer | ESM/`exports` 도입 여부는 P3 ADR |
 
 Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/about/previous-releases)를 기준으로 한다.
@@ -136,6 +137,8 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 - Prisma 5/6/7 CI/release matrix와 npm trusted publishing/provenance
 - `AK-M08A/B/C`의 Actions/Jest/Prettier/ts-jest 순차 갱신, Nest 11.2.3 dev trio,
   ESLint 10/typescript-eslint 8 flat-config toolchain
+- `AK-M10`의 PostgreSQL 14/16 + Prisma 5/6/7 matrix, no-Prisma packed root consumer,
+  대표 diagonal compatibility evidence policy
 - tenancy `TEN-M21`은 `DONE`이며 다시 열지 않는다. 역사적 published-only full-flow는 tenancy 0.15.0, API Keys 0.3.2, RBAC 0.2.1, Nest 11.2.1, Prisma 7.10.0 tuple과 legacy lane을 검증했다.
 - 이후 published `@nestarc/tenancy@0.16.0`의 별도 modern lane은 API Keys 0.3.2, RBAC 0.2.1, Outbox 0.2.1, Jobs 0.3.1, Webhook 0.13.1, Nest 11.2.1, Prisma 7.10.0을 registry lock/integrity와 함께 다시 검증했고 legacy/modern 실경로가 각각 3/3 통과했다.
 - 이후 API Keys/RBAC patch의 published-only 재검증은 새 tenancy 외부 작업 `TEN-ECO-NEXT`가 소유한다. `TEN-M21`을 재개하거나 API Keys 작업의 `DONE`을 이 사후 검증에 종속시키지 않는다.
@@ -161,7 +164,7 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 8B | `AK-M08B` | P1 | `DONE` | M | `AK-M08A` | Nest trio를 11.2.x default dev baseline으로 이동 |
 | 8C | `AK-M08C` | P1 | `DONE` | M | `AK-M08A` | ESLint 10/typescript-eslint 8 toolchain 정렬 |
 | 9 | `AK-M09` | P1 | `DONE` | M | `AK-M08B`, `AK-M08C` | Node 22/24 지원 계약으로 정렬 |
-| 10 | `AK-M10` | P1 | `READY` | L | `AK-M09` | Nest/Prisma/PostgreSQL/no-Prisma compatibility 증거 정책 고정 |
+| 10 | `AK-M10` | P1 | `DONE` | L | `AK-M09` | Nest/Prisma/PostgreSQL/no-Prisma compatibility 증거 정책 고정 |
 | 11 | `AK-M11` | P1 | `READY` | S | `AK-M08A`, `AK-M08C` | coverage floor와 CI evidence |
 | 12 | `AK-M15` | P2 | `DECISION` | S | 없음 | list의 active/expired/grace semantics 정렬 |
 | 13 | `AK-M12` | P2 | `BLOCKED` | M | `AK-M15` | public list DTO에서 verifier material 제거 |
@@ -171,11 +174,11 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 16B | `AK-M17B` | P2 | `EXTERNAL` | S | `AK-M17A` | GitHub reporting/security/ruleset 설정 |
 | 17 | `AK-M18` | P2 | `READY` | M | `AK-M08A`, `AK-M09` | release ancestry와 pack-once provenance |
 | 18 | `AK-M19` | P2 | `BLOCKED` | M | `AK-M08A`, `AK-M08B`, `AK-M08C`, `AK-M18` | CI/release/Dependabot 구조 정리 |
-| 19A | `AK-M20A` | P2 | `BLOCKED` | S | `AK-M09`, `AK-M10` | 문서 권위와 현재 지원표 정렬 |
+| 19A | `AK-M20A` | P2 | `READY` | S | `AK-M09`, `AK-M10` | 문서 권위와 현재 지원표 정렬 |
 | 19B | `AK-M20B` | P2 | `READY` | M | `AK-M02` | reusable storage contract의 public package 계약 |
-| 20 | `AK-M21` | P3 | `BLOCKED` | M | `AK-M10` | `exports`/ESM packaging ADR |
+| 20 | `AK-M21` | P3 | `DECISION` | M | `AK-M10` | `exports`/ESM packaging ADR |
 | 21 | `AK-M22` | P3 | `READY` | S | `AK-M02` | collision retry terminal error 계약 |
-| 22 | `AK-M23` | P3 | `BLOCKED` | S | `AK-M10` | Nest 12 stable strict-consumer 호환성 스파이크 |
+| 22 | `AK-M23` | P3 | `READY` | S | `AK-M10` | Nest 12 stable strict-consumer 호환성 스파이크 |
 
 P0는 `AK-M01`과 `AK-M02`를 서로 다른 PR로 진행한다. 어느 하나의 완료가 다른 하나를 대체하지 않는다.
 
@@ -579,19 +582,31 @@ profile A/B/C/D가 모두 통과한 Node 22.13.0이다. 공개 engine은 미래 
 
 ### `AK-M10` — Nest/Prisma/PostgreSQL/no-Prisma 지원 증거 정책
 
-- 상태: `P1 / READY`
+- 상태: `P1 / DONE`
 
 완료 조건:
 
-- [ ] Nest 10/11 전체 suite 깊이와 Prisma 5/6/7 DB contract의 역할을 문서화한다.
-- [ ] Nest10+Prisma7, Nest11+Prisma6 off-diagonal을 직접 smoke할지 대표 diagonal 정책으로 둘지 명시한다.
-- [ ] 지원한다고 선언한 major 경계는 적어도 strict install/typecheck/runtime 또는 real DB lane의 증거가 있다.
-- [ ] 전체 Cartesian matrix를 근거 없이 늘리지 않는다.
-- [ ] optional Prisma 미설치 root consumer를 실제 packed strict install/typecheck/runtime lane으로 추가한다. 현재 Prisma를 설치하는 strict consumers를 이 증거로 세지 않는다.
-- [ ] PRD의 PostgreSQL 14+ 선언을 실제 PostgreSQL 14 boundary lane으로 검증하거나 지원 하한을 증거에 맞게 정정한다. PostgreSQL 16 lane은 보존한다.
-- [ ] Prisma 5/6/7 각각의 exact runtime root를 반복 설치·실행하는 script/CI command를 제공한다.
+- [x] Nest 10/11 전체 suite 깊이와 Prisma 5/6/7 DB contract의 역할을 문서화한다.
+- [x] Nest10+Prisma7, Nest11+Prisma6 off-diagonal을 직접 smoke할지 대표 diagonal 정책으로 둘지 명시한다.
+- [x] 지원한다고 선언한 major 경계는 적어도 strict install/typecheck/runtime 또는 real DB lane의 증거가 있다.
+- [x] 전체 Cartesian matrix를 근거 없이 늘리지 않는다.
+- [x] optional Prisma 미설치 root consumer를 실제 packed strict install/typecheck/runtime lane으로 추가한다. 현재 Prisma를 설치하는 strict consumers를 이 증거로 세지 않는다.
+- [x] PRD의 PostgreSQL 14+ 선언을 실제 PostgreSQL 14 boundary lane으로 검증하거나 지원 하한을 증거에 맞게 정정한다. PostgreSQL 16 lane은 보존한다.
+- [x] Prisma 5/6/7 각각의 exact runtime root를 반복 설치·실행하는 script/CI command를 제공한다.
 
 검증: 프로필 C/D, peer metadata assertion, PostgreSQL 14/16 DB evidence, no-Prisma packed consumer.
+
+완료 결정(2026-08-30): compatibility 증거는 전체 Cartesian product가 아니라 통합 경계별
+최소 지속 lane으로 관리한다. Nest 11.2.3은 full source suite와 strict/HTTP packed consumer,
+Nest 10.4.20은 strict/HTTP packed boundary를 담당한다. Prisma 5.22.0/6.19.3/7.10.0은 각각
+PostgreSQL 16 real DB contract를 수행하고, Prisma 5.22.0 + PostgreSQL 14가 DB 하한을 증명한다.
+Nest 10 + Prisma 6과 Nest 11 + Prisma 7을 대표 diagonal로 유지하며 두 integration surface를
+결합하는 변경이나 재현된 호환성 실패가 있을 때만 off-diagonal을 추가한다. 별도 Nest 11.2.3
+packed root consumer는 `@prisma/client`가 dependency/lock/runtime resolution에 전혀 없는 상태에서
+strict install, `skipLibCheck: false` typecheck, root import, in-memory create/verify를 검증한다.
+정책과 변경 기준은
+[`2026-08-30-compatibility-evidence-policy.md`](./2026-08-30-compatibility-evidence-policy.md)에
+기록했고 CI/release publish 선행 gate에 같은 명령을 연결했다.
 
 ### `AK-M11` — coverage floor
 
@@ -713,7 +728,7 @@ profile A/B/C/D가 모두 통과한 Node 22.13.0이다. 공개 engine은 미래 
 
 ### `AK-M20A` — 문서 권위와 지원표
 
-- 상태: `P2 / BLOCKED (AK-M10)`
+- 상태: `P2 / READY (AK-M09, AK-M10 DONE)`
 
 완료 조건:
 
@@ -742,7 +757,7 @@ profile A/B/C/D가 모두 통과한 Node 22.13.0이다. 공개 engine은 미래 
 
 ### `AK-M21` — packaging/ESM ADR
 
-- 상태: `P3 / BLOCKED (AK-M10)`
+- 상태: `P3 / DECISION (AK-M10 DONE)`
 
 - 현 CommonJS `main/types`를 유지할지 `exports` map과 dual ESM/CJS를 도입할지 결정한다.
 - deep import 사용자를 먼저 조사한다.
@@ -759,7 +774,7 @@ profile A/B/C/D가 모두 통과한 Node 22.13.0이다. 공개 engine은 미래 
 
 ### `AK-M23` — Nest 12 stable compatibility spike
 
-- 상태: `P3 / BLOCKED (AK-M10)`
+- 상태: `P3 / READY (AK-M10 DONE)`
 - 2026-08-30 기준 [`@nestjs/core` latest는 12.0.1](https://www.npmjs.com/package/%40nestjs/core?activeTab=versions)이므로 더 이상 “stable 대기” 후보로 두지 않는다.
 - Nest 12.0.1 exact versions를 strict packed consumer에 설치해 install, typecheck, runtime smoke와 실제 HTTP Guard 경로를 조사한다.
 - 이 세션은 evidence와 ADR만 소유한다. peer 범위 확대, breaking migration, 구현 변경은 결과에 따라 별도 task/PR로 만든다.
@@ -803,37 +818,27 @@ api_keys_coverage_dir="$(mktemp -d /tmp/api-keys-coverage.XXXXXX)"
 
 ### 프로필 C — DB와 compatibility
 
+- Prisma 5.22.0 PostgreSQL 14 boundary contract
 - Prisma 5.22.0, 6.19.3, 7.10.0 PostgreSQL 16 contract
 - exact Nest 10.4.20/Prisma 6.19.3 strict consumer
 - exact Nest 11.2.3/Prisma 7.10.0 strict consumer
+- exact Nest 11.2.3 no-Prisma strict root consumer
+- exact Nest 10.4.20/11.2.3 HTTP consumer
 - 해당 작업이 지원 matrix를 바꿀 때만 선택한 off-diagonal lane
 
-현재 script는 한 번에 `PRISMA_E2E_RUNTIME_ROOT` 하나만 실행한다. 아래처럼 세 exact runtime을 각각 설치·반복해야 5/6/7 matrix 증거가 된다. `PRISMA_E2E_DATABASE_URL`을 생략하면 runner가 각 실행에 disposable PostgreSQL 16 container를 사용한다.
+`test:e2e:postgres-matrix`가 세 exact Prisma runtime root를 session-owned 임시 경로에 각각
+설치하고 PostgreSQL 14 boundary와 PostgreSQL 16의 세 Prisma major를 반복 실행한다. 이 명령은
+matrix 증거가 caller-provided database로 바뀌지 않도록 `PRISMA_E2E_DATABASE_URL`을 사용하지 않고
+실제 container server major를 확인한다. 단일 `test:e2e:prisma`는 선택한 runtime/database를
+진단할 때만 사용하며 전체 matrix 증거로 세지 않는다.
 
 ```bash
-api_keys_matrix_root="$(mktemp -d /tmp/api-keys-prisma-matrix.XXXXXX)"
-
-npm install --prefix "$api_keys_matrix_root/p5" --no-save --package-lock=false prisma@5.22.0 @prisma/client@5.22.0
-npm install --prefix "$api_keys_matrix_root/p6" --no-save --package-lock=false prisma@6.19.3 @prisma/client@6.19.3
-npm install --prefix "$api_keys_matrix_root/p7" --no-save --package-lock=false prisma@7.10.0 @prisma/client@7.10.0 @prisma/adapter-pg@7.10.0
-
-PRISMA_E2E_RUNTIME_ROOT="$api_keys_matrix_root/p5" npm run test:e2e:prisma
-PRISMA_E2E_RUNTIME_ROOT="$api_keys_matrix_root/p6" npm run test:e2e:prisma
-PRISMA_E2E_RUNTIME_ROOT="$api_keys_matrix_root/p7" npm run test:e2e:prisma
+npm run test:e2e:postgres-matrix
 npm run test:consumer:strict:legacy
 npm run test:consumer:strict:modern
-```
-
-다음 명령 이름은 현재 존재한다고 가정하지 않는다. 해당 작업이 script와 CI lane을 추가한 뒤부터 지속 프로필에 포함한다.
-
-```bash
-# AK-M01이 추가
+npm run test:consumer:no-prisma
 npm run test:consumer:http:nest10
 npm run test:consumer:http:nest11
-
-# AK-M10이 추가
-npm run test:e2e:postgres-matrix
-npm run test:consumer:no-prisma
 ```
 
 `test:e2e:postgres-matrix`는 PostgreSQL 14 boundary와 16 current lane을 구분해 보고해야 한다. 기존 strict consumers는 application context만 boot하므로 `AK-M01`의 HTTP/Guard/exception-filter 증거 또는 `AK-M10`의 no-Prisma 증거로 세지 않는다.
@@ -914,7 +919,7 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 - [x] `AK-M07A`: missing/denial telemetry semantics; `AK-M07B`: request-aware IP restriction contract
 - [x] `AK-M14`: legacy auth observer sync/thenable/async rejection과 reporter 재실패 격리
 - [x] `AK-M09`: exact Node 22.13.0 minimum/Node 24 source lanes와 minimum DB/consumer gates
-- [ ] `AK-M10`: PostgreSQL 14/16와 no-Prisma packed consumer
+- [x] `AK-M10`: PostgreSQL 14/16와 no-Prisma packed consumer
 - [ ] `AK-M11`: fresh coverage threshold
 - [ ] `AK-M18`: main ancestry와 consumer-verified exact tarball identity
 - [ ] `AK-M20B`: public storage contract 또는 corrected documentation packed test
@@ -931,9 +936,8 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
    `.github/workflows/ci.yml`과 `release.yml`에 같은 exact version의 persistent gate를 추가한다.
 4. profile A/B/D와 packed RBAC consumer를 다시 통과시켜 `AK-M06B`를 `DONE` 처리하고,
    tenancy-owned `TEN-ECO-NEXT`에 published package tuple을 인계한다.
-5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`는 완료됐다. 외부 RBAC release를
-   기다리는 동안 다음 순서의 실행 가능한 작업은 `AK-M10`이며, Nest 10/11, Prisma 5/6/7,
-   PostgreSQL 14/16, Prisma 미설치 선언/증거 표를 만들고 최소 지속 lane을 선택한다.
+5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`은 완료됐다. 외부 RBAC
+   release를 기다리는 동안 다음 순서의 실행 가능한 작업은 `AK-M11` coverage floor다.
 
 Published RBAC 0.2.1은 `request.apiKeyContext` conflict와 trim/coerce 계약 때문에 의도적으로
 RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증거로 사용하지 않는다.
@@ -958,6 +962,7 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-30 | `AK-M08B` | `DONE` | `055daa5` | `055daa5 + worktree` (PR/release 없음) | Nest trio 11.2.3, 12 suites/188 tests, exact Nest 10.4.20/11.2.3 strict+HTTP, Prisma 5/6/7 각 20 PASS | AK-M08C와 함께 toolchain 검증 뒤 `AK-M09` |
 | 2026-08-30 | `AK-M08C` | `DONE` | `055daa5` | `055daa5 + worktree` (PR/release 없음) | ESLint 10.9.1 flat config, coverage 88.23/84.10/86.95/87.86, clean npm ci, production/full audit 0 | `AK-M09` Node 22/24 지원 계약 |
 | 2026-08-30 | `AK-M09` | `DONE` | `fa4093f` | `fa4093f + worktree` (PR/release 없음) | exact Node 22.13.0/24.11.1 A/B/C/D, 각 12 suites/188 tests와 coverage 88.23/84.10/86.95/87.86, Prisma 5/6/7 각 20, Nest 10/11 strict+HTTP, audits 0 | `AK-M10` compatibility 증거 정책 |
+| 2026-08-30 | `AK-M10` | `DONE` | `2488896` | `2488896 + worktree` (PR/release 없음) | PostgreSQL 14/Prisma 5와 PostgreSQL 16/Prisma 5/6/7 각 20 PASS, no-Prisma strict packed consumer, Nest 10/11 strict+HTTP, profile A/D PASS | `AK-M11` coverage floor |
 
 ### AK-M01 종료 인계
 
@@ -1455,4 +1460,46 @@ Unverified paths and reason: 변경 head의 remote GitHub CI/release는 push 전
 External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
 Next exact action: AK-M10에서 Nest/Prisma/PostgreSQL/no-Prisma 선언·증거 표를 만들고 PostgreSQL
   14 boundary와 optional Prisma 미설치 packed consumer를 RED evidence로 시작한다.
+```
+
+### AK-M10 종료 인계
+
+```text
+Task: AK-M10
+State: DONE
+Start ref / end ref: 2488896 / 2488896 + session worktree (commit·PR·release 없음)
+Changed files: scripts/test-prisma-e2e.js, scripts/test-postgres-matrix.js,
+  scripts/test-no-prisma-consumer.js, package.json, .github/workflows/ci.yml,
+  .github/workflows/release.yml, README.md, CHANGELOG.md,
+  docs/2026-08-30-compatibility-evidence-policy.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: full Cartesian matrix 대신 integration-boundary evidence를 유지한다.
+  Nest 10.4.20/Prisma 6.19.3와 Nest 11.2.3/Prisma 7.10.0은 대표 diagonal이며, 두 surface를
+  결합하는 변경이나 재현된 실패가 있을 때만 off-diagonal을 추가한다. PostgreSQL 14 하한은
+  Prisma 5.22.0, PostgreSQL 16 current는 Prisma 5.22.0/6.19.3/7.10.0 모두로 검증한다.
+  Prisma optional peer는 Prisma가 전혀 없는 별도 Nest 11.2.3 packed root consumer가 증명한다.
+Commands and exact results:
+  npm run test:consumer:no-prisma => exact Nest 11.2.3 strict install, skipLibCheck:false typecheck,
+    root import, in-memory create/verify PASS; consumer lock/runtime에 @prisma/client 없음
+  최초 npm run test:e2e:postgres-matrix => PostgreSQL 14/Prisma 5와 PostgreSQL 16/Prisma 5
+    각 1 suite/20 tests PASS 뒤 PostgreSQL 초기화 경합 발견; pg_isready 대신 실제
+    psql SHOW server_version_num 성공을 readiness/major 증거로 사용하도록 runner 보강
+  최종 npm run test:e2e:postgres-matrix => PostgreSQL 14/Prisma 5.22.0 및 PostgreSQL 16/
+    Prisma 5.22.0, 6.19.3, 7.10.0 각각 1 suite/20 tests PASS; disposable container 잔존 없음
+  npm run test:consumer:strict:legacy => exact Nest 10.4.20/Prisma 6.19.3 PASS
+  npm run test:consumer:strict:modern => exact Nest 11.2.3/Prisma 7.10.0 PASS
+  npm run test:consumer:http:nest10 + nest11 => default HTTP contract 각각 PASS
+  npm run lint + tsc --noEmit => PASS; npm test -- --runInBand => 12 suites/188 tests PASS
+  node --check on three matrix/consumer scripts => PASS; CI/release YAML parse => PASS
+  npm run build => PASS
+  npm pack --dry-run --json --cache /tmp/api-keys-m10-pack.JUUsx3 => 48 entries PASS,
+    sha512-eKXVqciUWLpyoUtrT2M8KrhiKdt8j4CsAd2vISO1hmZKMXEtBC5ZuRlQMF2HiJ8P628vwYoVaY72kQ/PjuBrdw==
+  npm run bench:smoke => PASS; |unknown-known invalid| p50 0.1µs below 500µs
+  npm audit --omit=dev --json => production vulnerabilities 0
+  git diff --check => PASS after final plan update
+Unverified paths and reason: 변경 head의 remote GitHub CI/release는 push 전이라 미실행했다.
+  ignored test/e2e/generated/prisma-client는 matrix가 exact Prisma 7.10.0 client로 마지막 재생성했다.
+External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
+Next exact action: AK-M11에서 fresh coverage와 real DB adapter gate 책임을 분리하고 threshold를
+  제안한 뒤 의도적 regression이 CI gate를 실패시키는지 검증한다.
 ```

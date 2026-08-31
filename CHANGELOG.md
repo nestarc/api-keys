@@ -12,6 +12,12 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ### Added
 
+- Add a reproducible PostgreSQL 14/16 compatibility command that installs exact isolated Prisma
+  5.22.0, 6.19.3, and 7.10.0 runtimes, plus an independent packed root consumer proving that the
+  in-memory/custom-storage path installs, typechecks, and runs without `@prisma/client`.
+- Document the minimum persistent NestJS/Prisma/PostgreSQL evidence policy and keep representative
+  legacy/modern diagonals instead of expanding to an unbounded Cartesian matrix.
+
 - Add request-aware `authorizeRequest()` and make `ApiKeysGuard` use it for environment, IP, and
   scope policy. Restricted credentials fail closed when no client IP is available, while the
   existing `verify()` method remains an explicitly credential-only compatibility primitive.

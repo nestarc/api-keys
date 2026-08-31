@@ -40,6 +40,20 @@ declares support for `^5.0.0 || ^6.0.0 || ^7.0.0`. Consumers that use the in-mem
 a custom storage adapter do not need to install Prisma. Prisma 7 consumers must also satisfy
 Prisma's Node.js requirement and configure the driver adapter for their database.
 
+| Supported boundary | Persistent evidence |
+| --- | --- |
+| NestJS 10 | Exact 10.4.20 packed strict install/typecheck/runtime and default HTTP Guard pipeline |
+| NestJS 11 | Full source suite plus exact 11.2.3 packed strict and HTTP consumers |
+| Prisma 5/6/7 | Exact 5.22.0, 6.19.3, and 7.10.0 generated-client storage contracts on PostgreSQL 16 |
+| PostgreSQL 14+ | Prisma 5.22.0 storage contract on PostgreSQL 14; all Prisma majors on PostgreSQL 16 |
+| Prisma omitted | Independent NestJS 11.2.3 packed root consumer with no Prisma install or lock entry |
+
+The project tests integration boundaries rather than every NestJS/Prisma/PostgreSQL Cartesian
+combination. The legacy NestJS 10 + Prisma 6 and modern NestJS 11 + Prisma 7 packed lanes are the
+representative diagonals; Prisma storage is independently tested against a real database. See the
+[compatibility evidence policy](docs/2026-08-30-compatibility-evidence-policy.md) for lane ownership,
+off-diagonal criteria, and the exact reproducible commands.
+
 ## Quickstart
 
 ```typescript
@@ -535,6 +549,7 @@ request(app).get('/reports').set('Authorization', `Bearer ${fixture.key}`);
 - [Tenant identity and management boundary ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-tenant-identity-contract-adr.md)
 - [Request authorization telemetry ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-request-authorization-telemetry-adr.md)
 - [Node.js support policy ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-node-support-policy-adr.md)
+- [Compatibility evidence policy](docs/2026-08-30-compatibility-evidence-policy.md)
 - [`CHANGELOG.md`](CHANGELOG.md) Release history
 
 ## Contributing
@@ -542,10 +557,12 @@ request(app).get('/reports').set('Authorization', `Bearer ${fixture.key}`);
 CI runs `lint`, `test`, `build`, and a bounded benchmark smoke check on the exact Node 22.13.0
 minimum and Node 24 for every PR. The DB and packed-consumer jobs run on the minimum so support
 cannot drift below the public `engines.node` contract. CI also runs the PostgreSQL storage contract
-against matching Prisma CLI/client versions
-5.22.0, 6.19.3, and 7.10.0; the Prisma 7 lane uses matching `@prisma/adapter-pg`. Run that
-contract locally with `npm run test:e2e:prisma`; the runner uses `PRISMA_E2E_DATABASE_URL` when
-supplied, otherwise it starts a disposable PostgreSQL 16 Docker container.
+against exact matching Prisma CLI/client versions 5.22.0, 6.19.3, and 7.10.0; the Prisma 7 lane
+uses matching `@prisma/adapter-pg`. Run the full support matrix with
+`npm run test:e2e:postgres-matrix`. It verifies Prisma 5 against PostgreSQL 14 and all three Prisma
+versions against PostgreSQL 16 in disposable Docker containers. For one exact runtime/database
+combination, `npm run test:e2e:prisma` still accepts `PRISMA_E2E_RUNTIME_ROOT` and
+`PRISMA_E2E_DATABASE_URL`, but that single command is not complete support-matrix evidence.
 
 `npm run test:consumer:strict:legacy` packs the library and verifies exact Nest 10.4.20 with
 Prisma 6.19.3. `npm run test:consumer:strict:modern` verifies exact Nest 11.2.3 with Prisma
@@ -554,6 +571,12 @@ metadata, compile the packed public declarations with `skipLibCheck: false`, and
 application context. They reject inherited npm bypass settings and explicitly keep
 `--legacy-peer-deps` and `--force` disabled.
 `npm run test:consumer:strict` defaults to the modern lane.
+
+`npm run test:consumer:no-prisma` uses another independent packed root consumer. It does not list
+or install `@prisma/client`, rejects any Prisma client entry in the consumer lock, compiles the
+public declarations with `skipLibCheck: false`, imports the package root, and boots the in-memory
+adapter path. This is the persistent evidence for the optional Prisma peer; the legacy and modern
+strict consumers both install Prisma and do not count for that claim.
 
 `npm run test:consumer:http:nest10` and `npm run test:consumer:http:nest11` pack the library and
 exercise the default Nest HTTP exception pipeline with the exact supported Nest versions. They
@@ -566,9 +589,9 @@ canonical/legacy API-key conflicts plus trusted tenant reconciliation. Published
 known RED prerequisite result and must not be used as passing evidence for this gate.
 
 Releases are tag-driven: `npm version <bump> && git push --tags` triggers the workflow in
-[`.github/workflows/release.yml`](.github/workflows/release.yml), which repeats the Prisma matrix
-before publishing to npm with provenance. Pre-release versions (anything with a `-` in the
-version) are published under the `next` dist-tag.
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which repeats the PostgreSQL,
+Prisma, packed-consumer, and Nest HTTP gates before publishing to npm with provenance. Pre-release
+versions (anything with a `-` in the version) are published under the `next` dist-tag.
 
 ## License
 
