@@ -6,6 +6,18 @@ const zlib = require('node:zlib');
 
 const projectRoot = path.resolve(__dirname, '..');
 const METADATA_FILENAME = 'release-candidate.json';
+const EXPECTED_PACKAGE_EXPORTS = {
+  '.': {
+    types: './dist/index.d.ts',
+    require: './dist/index.js',
+    import: './dist/index.js',
+    default: './dist/index.js',
+  },
+  './prisma/schema.example.prisma': './prisma/schema.example.prisma',
+  './prisma/schema.example.v7.prisma': './prisma/schema.example.v7.prisma',
+  './prisma/prisma.config.example.ts': './prisma/prisma.config.example.ts',
+  './package.json': './package.json',
+};
 const REQUIRED_FILES = [
   'LICENSE',
   'README.md',
@@ -107,6 +119,15 @@ function verifyContentAllowlist(paths) {
   }
 }
 
+function verifyPackageMetadata(packageJson) {
+  if (packageJson.main !== 'dist/index.js' || packageJson.types !== 'dist/index.d.ts') {
+    throw new Error('Release candidate main/types entry points drifted');
+  }
+  if (JSON.stringify(packageJson.exports) !== JSON.stringify(EXPECTED_PACKAGE_EXPORTS)) {
+    throw new Error('Release candidate package exports map drifted');
+  }
+}
+
 function inspectTarball(tarballPath) {
   const bytes = fs.readFileSync(tarballPath);
   const entries = parseTar(bytes);
@@ -117,6 +138,7 @@ function inspectTarball(tarballPath) {
     throw new Error('Release candidate does not contain package/package.json');
   }
   const packageJson = JSON.parse(packageEntry.content.toString('utf8'));
+  verifyPackageMetadata(packageJson);
   return {
     bytes,
     packageJson,

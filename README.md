@@ -40,19 +40,27 @@ declares support for `^5.0.0 || ^6.0.0 || ^7.0.0`. Consumers that use the in-mem
 a custom storage adapter do not need to install Prisma. Prisma 7 consumers must also satisfy
 Prisma's Node.js requirement and configure the driver adapter for their database.
 
-| Supported boundary | Persistent evidence                                                                   |
-| ------------------ | ------------------------------------------------------------------------------------- |
-| NestJS 10          | Exact 10.4.20 packed strict install/typecheck/runtime and default HTTP Guard pipeline |
-| NestJS 11          | Full source suite plus exact 11.2.3 packed strict and HTTP consumers                  |
-| Prisma 5/6/7       | Exact 5.22.0, 6.19.3, and 7.10.0 generated-client storage contracts on PostgreSQL 16  |
-| PostgreSQL 14+     | Prisma 5.22.0 storage contract on PostgreSQL 14; all Prisma majors on PostgreSQL 16   |
-| Prisma omitted     | Independent NestJS 11.2.3 packed root consumer with no Prisma install or lock entry   |
+| Supported boundary | Persistent evidence                                                                           |
+| ------------------ | --------------------------------------------------------------------------------------------- |
+| NestJS 10          | Exact 10.4.20 packed strict install/typecheck/runtime and default HTTP Guard pipeline         |
+| NestJS 11          | Full source suite plus exact 11.2.3 packed strict and HTTP consumers                          |
+| Prisma 5/6/7       | Exact 5.22.0, 6.19.3, and 7.10.0 generated-client storage contracts on PostgreSQL 16          |
+| PostgreSQL 14+     | Prisma 5.22.0 storage contract on PostgreSQL 14; all Prisma majors on PostgreSQL 16           |
+| Prisma omitted     | Independent NestJS 11.2.3 packed root consumer with no Prisma install or lock entry           |
+| Module formats     | CommonJS `require`, native ESM import, and NodeNext declaration consumer from one CJS runtime |
 
 The project tests integration boundaries rather than every NestJS/Prisma/PostgreSQL Cartesian
 combination. The legacy NestJS 10 + Prisma 6 and modern NestJS 11 + Prisma 7 packed lanes are the
 representative diagonals; Prisma storage is independently tested against a real database. See the
 [compatibility evidence policy](docs/2026-08-30-compatibility-evidence-policy.md) for lane ownership,
 off-diagonal criteria, and the exact reproducible commands.
+
+Import runtime and type APIs from the package root. The package uses one CommonJS runtime for both
+`require('@nestarc/api-keys')` and native ESM `import` so class and Nest injection-token identity do
+not split across formats. Internal `dist/**` paths are not public. The three packaged Prisma
+schema/config examples and `package.json` remain available through exact package subpaths. See the
+[package exports and ESM ADR](docs/2026-08-31-package-exports-esm-adr.md) for the complete boundary
+and the `0.4.0` deep-import migration note.
 
 Maintenance work is prioritized in the
 [canonical P0–P3 execution queue](docs/2026-08-30-p0-p3-maintenance-work-plan.md). Versioned PRDs,

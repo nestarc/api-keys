@@ -151,6 +151,8 @@ jobs:
             script: test:consumer:strict:modern
           - name: Nest 11 / no Prisma
             script: test:consumer:no-prisma
+          - name: CommonJS / native ESM
+            script: test:consumer:module-formats
           - name: Custom storage contract
             script: test:consumer:storage-contract
     steps:

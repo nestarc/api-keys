@@ -123,7 +123,7 @@ M  docs/prisma-peer-compatibility-plan-2026-08-23.md
 | NestJS | 10/11 | Nest 11.2.3 full source suite+strict/HTTP, Nest 10.4.20 strict/HTTP | Nest 12는 `AK-M23` evidence 뒤 결정 |
 | Prisma | 5/6/7 optional | 각 major PostgreSQL 16 contract, 6/7 대표 strict consumers, no-Prisma root consumer | 결합 변경/실패 때만 targeted off-diagonal 추가 |
 | PostgreSQL | 14+ | Prisma 5 + PostgreSQL 14 boundary, Prisma 5/6/7 + PostgreSQL 16 current | 새 하한/상한은 real DB evidence 뒤 변경 |
-| module format | CommonJS `main/types` | 현재 tarball consumer | ESM/`exports` 도입 여부는 P3 ADR |
+| module format | CommonJS runtime + explicit root/asset `exports` | CJS, native ESM, NodeNext, no-Prisma packed consumer | 별도 ESM build는 실제 최적화/consumer 요구 전까지 도입하지 않음 |
 
 Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/about/previous-releases)를 기준으로 한다.
 
@@ -139,6 +139,8 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
   ESLint 10/typescript-eslint 8 flat-config toolchain
 - `AK-M10`의 PostgreSQL 14/16 + Prisma 5/6/7 matrix, no-Prisma packed root consumer,
   대표 diagonal compatibility evidence policy
+- `AK-M21`의 explicit package `exports`, shared CommonJS/native ESM runtime identity,
+  NodeNext/no-Prisma packed consumer와 exact Prisma example subpath 계약
 - tenancy `TEN-M21`은 `DONE`이며 다시 열지 않는다. 역사적 published-only full-flow는 tenancy 0.15.0, API Keys 0.3.2, RBAC 0.2.1, Nest 11.2.1, Prisma 7.10.0 tuple과 legacy lane을 검증했다.
 - 이후 published `@nestarc/tenancy@0.16.0`의 별도 modern lane은 API Keys 0.3.2, RBAC 0.2.1, Outbox 0.2.1, Jobs 0.3.1, Webhook 0.13.1, Nest 11.2.1, Prisma 7.10.0을 registry lock/integrity와 함께 다시 검증했고 legacy/modern 실경로가 각각 3/3 통과했다.
 - 이후 API Keys/RBAC patch의 published-only 재검증은 새 tenancy 외부 작업 `TEN-ECO-NEXT`가 소유한다. `TEN-M21`을 재개하거나 API Keys 작업의 `DONE`을 이 사후 검증에 종속시키지 않는다.
@@ -176,7 +178,7 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 18 | `AK-M19` | P2 | `DONE` | M | `AK-M08A`, `AK-M08B`, `AK-M08C`, `AK-M18` | CI/release/Dependabot 구조 정리 |
 | 19A | `AK-M20A` | P2 | `DONE` | S | `AK-M09`, `AK-M10` | 문서 권위와 현재 지원표 정렬 |
 | 19B | `AK-M20B` | P2 | `DONE` | M | `AK-M02` | reusable storage contract의 public package 계약 |
-| 20 | `AK-M21` | P3 | `DECISION` | M | `AK-M10` | `exports`/ESM packaging ADR |
+| 20 | `AK-M21` | P3 | `DONE` | M | `AK-M10` | `exports`/ESM packaging ADR |
 | 21 | `AK-M22` | P3 | `READY` | S | `AK-M02` | collision retry terminal error 계약 |
 | 22 | `AK-M23` | P3 | `READY` | S | `AK-M10` | Nest 12 stable strict-consumer 호환성 스파이크 |
 
@@ -877,12 +879,29 @@ declaration을 필수로 확인한다. no-Prisma clean consumer는 독립 custom
 
 ### `AK-M21` — packaging/ESM ADR
 
-- 상태: `P3 / DECISION (AK-M10 DONE)`
+- 상태: `P3 / DONE (AK-M10 DONE)`
 
-- 현 CommonJS `main/types`를 유지할지 `exports` map과 dual ESM/CJS를 도입할지 결정한다.
-- deep import 사용자를 먼저 조사한다.
-- 도입 시 root/type/CJS/ESM, optional Prisma 미설치, schema/config files를 packed consumer에서 검증한다.
-- 조사 없이 `exports`를 추가해 기존 deep import를 차단하지 않는다.
+완료 조건:
+
+- [x] 공개 GitHub code search, 현재 저장소와 history에서 package-name deep import 사용을 조사한다.
+- [x] CommonJS 유지, explicit `exports`, dual ESM/CJS build 선택을 ADR로 비교·결정한다.
+- [x] root type/runtime API, CommonJS `require`, native ESM named import와 loader identity를 검증한다.
+- [x] `type: module` + NodeNext + `skipLibCheck: false` declaration consumer를 검증한다.
+- [x] optional Prisma 미설치 root/adapter symbol load와 lock/install 부재를 검증한다.
+- [x] schema/config example과 `package.json` exact subpath를 공개하고 private `dist/**` deep import를 차단한다.
+- [x] actual tarball metadata/allowlist와 CI/release packed-consumer gate를 같은 계약으로 고정한다.
+- [x] deep import 차단의 pre-1.0 breaking 성격과 migration을 README/CHANGELOG에 기록한다.
+
+완료 결정(2026-08-31): canonical runtime은 CommonJS 하나로 유지한다. package root `exports`의
+`types`는 `dist/index.d.ts`, `require`/`import`/`default`는 모두 같은 `dist/index.js`를 가리키고,
+older resolver를 위해 top-level `main`/`types`도 유지한다. native ESM은 현재 CommonJS build의 named
+export interop를 사용하며 별도 ESM graph는 만들지 않아 Nest DI token, decorator metadata,
+`instanceof` identity가 format별로 갈라지는 dual-package hazard를 피한다. exact public asset subpath는
+Prisma 5/6 schema, Prisma 7 schema, Prisma config example과 `package.json`이며 `dist/**`는 private다.
+공개 검색의 `@nestarc/api-keys/` 세 후보는 모두 tenancy 문서/lockfile이었고 `dist`/`storage` deep
+import 결과는 0건이었지만 private consumer 부재를 증명하지는 않으므로 차단은 planned `0.4.0` breaking
+change로 기록했다. 결정 근거는
+[`2026-08-31-package-exports-esm-adr.md`](./2026-08-31-package-exports-esm-adr.md)에 있다.
 
 ### `AK-M22` — collision retry terminal error
 
@@ -2032,4 +2051,51 @@ Unverified paths and reason: 기존 storage implementation과 DB query를 변경
 External PR/release evidence: 새 PR/release 없음.
 Next exact action: AK-M20A/B 변경만 검토·commit한 뒤 AK-M21에서 public deep import 사용과
   CJS/ESM consumer를 조사해 packaging ADR을 작성한다.
+```
+
+### AK-M21 종료 인계
+
+```text
+Task: AK-M21
+State: DONE
+Start ref / end ref: f591737 / f591737 + session worktree (commit·PR·release 없음)
+Changed files: package.json, scripts/package-candidate.js,
+  scripts/test-module-format-consumer.js, scripts/test-release-workflow.js,
+  .github/workflows/ci.yml, .github/workflows/release.yml, README.md, CHANGELOG.md,
+  docs/2026-08-31-package-exports-esm-adr.md,
+  docs/2026-08-30-compatibility-evidence-policy.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: CommonJS 하나를 canonical runtime으로 유지하고 explicit package exports에서
+  require/import/default를 같은 dist/index.js로 보낸다. root declaration과 legacy main/types를
+  유지하며 exact Prisma schema/config 및 package.json subpath만 공개한다. 별도 ESM build는 현재
+  요구와 이득이 없고 dual-package identity 위험이 있어 도입하지 않는다. private dist deep import
+  차단은 planned pre-1.0 0.4.0 breaking migration이다.
+Commands and exact results:
+  public GitHub code search => @nestarc/api-keys/ 후보 3건(tenancy 문서/lockfile),
+    @nestarc/api-keys/dist 및 @nestarc/api-keys/storage 0건; repository/history deep import 0건
+  node native ESM named import from current CommonJS dist => PASS
+  RED: npm run test:consumer:module-formats => expected FAIL, packed exports undefined
+  GREEN: npm run test:consumer:module-formats => CommonJS/native ESM shared identity,
+    NodeNext strict declaration, no-Prisma, exact asset subpath, private deep import rejection PASS
+  npm run test:consumer:no-prisma => exact Nest 11.2.3/no-Prisma Node16 type/runtime PASS
+  npm run test:consumer:strict:legacy => exact Nest 10.4.20/Prisma 6.19.3 PASS
+  npm run test:consumer:strict:modern => exact Nest 11.2.3/Prisma 7.10.0 PASS
+  npm run test:consumer:storage-contract => public runner 9 checks/no-Prisma consumer PASS
+  npm run test:release:candidate => 50-file allowlist/exports/byte identity PASS
+  npm run test:release:workflow => CI/release module-format command parity and pack-once graph PASS
+  npm test -- --runInBand => 13 suites, 208 tests PASS
+  npm run test:coverage -- --coverageDirectory=/tmp/api-keys-akm21-coverage =>
+    statements 90.46%, branches 84.42%, functions 89.79%, lines 90.18%; all floors PASS
+  npm run lint -- --no-cache; npm run build => PASS
+  changed-file Prettier check; workflow YAML parse; git diff --check => PASS
+  NPM_CONFIG_CACHE=/tmp/api-keys-akm21-npm-cache npm pack --dry-run --ignore-scripts --json =>
+    50 files, size 34,208 bytes, unpacked 145,655 bytes, required root/assets present PASS
+  npm view baseline => latest 0.3.2, gitHead a24fe1d, published 2026-08-30T04:50:07.525Z
+Unverified paths and reason: storage/runtime source와 database contract는 바뀌지 않아
+  PostgreSQL/Prisma 5/6/7 matrix를 재실행하지 않았다. remote GitHub CI/tag release는 push 전이라
+  미실행했고 실제 npm publish/provenance는 다음 0.4.0 release가 소유한다. 첫 npm pack 시도는 기존
+  root-owned user cache 때문에 EPERM이었고 task-owned /tmp cache로 같은 dry-run을 통과했다.
+External PR/release evidence: 새 PR/release 없음. 공개 GitHub search와 npm registry baseline만 재조회했다.
+Next exact action: AK-M21 변경 파일만 검토·commit해 planned 0.4.0 branch에 포함한 뒤 AK-M22의
+  duplicate adapter terminal retry error RED contract를 시작한다.
 ```

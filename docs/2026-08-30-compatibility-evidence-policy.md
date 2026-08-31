@@ -12,16 +12,17 @@ product of every NestJS, Prisma, PostgreSQL, and Node.js version. A supported ma
 have at least one persistent strict install/typecheck/runtime or real-database lane. A version is
 not added to public peer metadata before that evidence exists.
 
-| Boundary | Exact persistent evidence | Depth and responsibility |
-| --- | --- | --- |
-| NestJS 10 | 10.4.20 packed strict consumer with Prisma 6.19.3; 10.4.20 packed HTTP consumer | Strict npm peer resolution, public declaration typecheck, application-context runtime, and default HTTP Guard/exception behavior |
-| NestJS 11 | 11.2.3 full source suite; 11.2.3 packed strict consumer with Prisma 7.10.0; 11.2.3 packed HTTP consumer | Development baseline plus the same packed and HTTP boundaries as NestJS 10 |
-| Prisma 5 | 5.22.0 CLI/client against PostgreSQL 14 and 16 | Lowest Prisma and PostgreSQL boundary plus current PostgreSQL storage contract |
-| Prisma 6 | 6.19.3 CLI/client against PostgreSQL 16 | Real generated-client storage contract; legacy packed representative pairs it with NestJS 10 |
-| Prisma 7 | 7.10.0 CLI/client/`@prisma/adapter-pg` against PostgreSQL 16 | Real generated-client and driver-adapter storage contract; modern packed representative pairs it with NestJS 11 |
-| PostgreSQL 14 | Prisma 5.22.0 storage contract on `postgres:14-alpine` | Public database support floor |
-| PostgreSQL 16 | Prisma 5.22.0, 6.19.3, and 7.10.0 storage contracts on `postgres:16-alpine` | Current database lane and all supported Prisma majors |
-| Prisma omitted | NestJS 11.2.3 packed root consumer with no `@prisma/client` lock/install entry | Strict install, public declaration typecheck with `skipLibCheck: false`, root import, Nest application-context boot, and in-memory create/verify runtime |
+| Boundary       | Exact persistent evidence                                                                               | Depth and responsibility                                                                                                                                 |
+| -------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| NestJS 10      | 10.4.20 packed strict consumer with Prisma 6.19.3; 10.4.20 packed HTTP consumer                         | Strict npm peer resolution, public declaration typecheck, application-context runtime, and default HTTP Guard/exception behavior                         |
+| NestJS 11      | 11.2.3 full source suite; 11.2.3 packed strict consumer with Prisma 7.10.0; 11.2.3 packed HTTP consumer | Development baseline plus the same packed and HTTP boundaries as NestJS 10                                                                               |
+| Prisma 5       | 5.22.0 CLI/client against PostgreSQL 14 and 16                                                          | Lowest Prisma and PostgreSQL boundary plus current PostgreSQL storage contract                                                                           |
+| Prisma 6       | 6.19.3 CLI/client against PostgreSQL 16                                                                 | Real generated-client storage contract; legacy packed representative pairs it with NestJS 10                                                             |
+| Prisma 7       | 7.10.0 CLI/client/`@prisma/adapter-pg` against PostgreSQL 16                                            | Real generated-client and driver-adapter storage contract; modern packed representative pairs it with NestJS 11                                          |
+| PostgreSQL 14  | Prisma 5.22.0 storage contract on `postgres:14-alpine`                                                  | Public database support floor                                                                                                                            |
+| PostgreSQL 16  | Prisma 5.22.0, 6.19.3, and 7.10.0 storage contracts on `postgres:16-alpine`                             | Current database lane and all supported Prisma majors                                                                                                    |
+| Prisma omitted | NestJS 11.2.3 packed root consumer with no `@prisma/client` lock/install entry                          | Strict install, public declaration typecheck with `skipLibCheck: false`, root import, Nest application-context boot, and in-memory create/verify runtime |
+| Module format  | NestJS 11.2.3 packed no-Prisma CommonJS/native ESM consumer                                             | Exact `exports` metadata, shared loader identity, NodeNext declaration compile, public asset resolution, and private deep-import rejection               |
 
 The source suite runs on exact Node.js 22.13.0 and Node 24. The DB and packed-consumer lanes run on
 the exact supported Node.js minimum, 22.13.0, so a transitive engine-floor increase fails before
@@ -53,6 +54,7 @@ npm run test:e2e:postgres-matrix
 npm run test:consumer:strict:legacy
 npm run test:consumer:strict:modern
 npm run test:consumer:no-prisma
+npm run test:consumer:module-formats
 npm run test:consumer:http:nest10
 npm run test:consumer:http:nest11
 ```

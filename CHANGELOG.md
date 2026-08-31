@@ -73,6 +73,10 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ### Changed
 
+- **Breaking in the planned pre-1.0 `0.4.0` release:** add an explicit package `exports` map.
+  CommonJS `require` and native ESM `import` share the existing CommonJS runtime and root
+  declarations; Prisma schema/config examples remain exact public subpaths, while undocumented
+  `dist/**` deep imports are blocked. Deep-import consumers must migrate to package-root exports.
 - Make tagged releases fail unless the tag commit is on canonical `origin/main` and the tag,
   package version, and dated changelog heading agree. The workflow now packs one allowlisted
   tarball, verifies its SHA-256/SRI in downstream consumers, and publishes those exact bytes via

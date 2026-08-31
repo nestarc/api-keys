@@ -174,6 +174,11 @@ function main() {
       1,
       `${name} must run the public storage contract packed consumer once`,
     );
+    assert.equal(
+      source.split('test:consumer:module-formats').length - 1,
+      1,
+      `${name} must run the CommonJS/native ESM packed consumer once`,
+    );
   }
 
   const dependencyGroups = {

@@ -10,6 +10,18 @@
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./prisma/schema.example.prisma": "./prisma/schema.example.prisma",
+    "./prisma/schema.example.v7.prisma": "./prisma/schema.example.v7.prisma",
+    "./prisma/prisma.config.example.ts": "./prisma/prisma.config.example.ts",
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist",
     "prisma/prisma.config.example.ts",
@@ -31,6 +43,7 @@
     "test:consumer:http:nest10": "node scripts/test-http-consumer.js --nest 10.4.20",
     "test:consumer:http:nest11": "node scripts/test-http-consumer.js --nest 11.2.3",
     "test:consumer:no-prisma": "node scripts/test-no-prisma-consumer.js",
+    "test:consumer:module-formats": "node scripts/test-module-format-consumer.js",
     "test:consumer:storage-contract": "node scripts/test-storage-contract-consumer.js",
     "test:consumer:rbac": "node scripts/test-rbac-consumer.js",
     "test:release:candidate": "node scripts/test-package-candidate.js",
