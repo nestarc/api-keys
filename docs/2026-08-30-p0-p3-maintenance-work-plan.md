@@ -170,8 +170,8 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 13 | `AK-M12` | P2 | `DONE` | M | 없음; filter 의미 비변경 | public list DTO에서 verifier material 제거 |
 | 14 | `AK-M13` | P2 | `DONE` | S | `AK-M04` | raw key environment와 stored environment bind |
 | 15 | `AK-M16` | P2 | `DONE` | S | `AK-M05` | InMemory storage record Date defensive copy |
-| 16A | `AK-M17A` | P2 | `DECISION` | S | 없음 | `SECURITY.md`와 지원 release policy |
-| 16B | `AK-M17B` | P2 | `EXTERNAL` | S | `AK-M17A` | GitHub reporting/security/ruleset 설정 |
+| 16A | `AK-M17A` | P2 | `DONE` | S | 없음 | `SECURITY.md`와 지원 release policy |
+| 16B | `AK-M17B` | P2 | `DONE` | S | `AK-M17A` | GitHub reporting/security/ruleset 설정 |
 | 17 | `AK-M18` | P2 | `READY` | M | `AK-M08A`, `AK-M09` | release ancestry와 pack-once provenance |
 | 18 | `AK-M19` | P2 | `BLOCKED` | M | `AK-M08A`, `AK-M08B`, `AK-M08C`, `AK-M18` | CI/release/Dependabot 구조 정리 |
 | 19A | `AK-M20A` | P2 | `READY` | S | `AK-M09`, `AK-M10` | 문서 권위와 현재 지원표 정렬 |
@@ -728,27 +728,47 @@ source suite로 재검증했다.
 
 ### `AK-M17A` — SECURITY와 reporting policy
 
-- 상태: `P2 / DECISION`
+- 상태: `P2 / DONE`
 
 완료 조건:
 
-- [ ] `SECURITY.md`에 지원 버전, 비공개 신고 경로, 응답 범위, credential/PoC 주의사항을 기록한다.
-- [ ] 존재하지 않는 이메일이나 SLA를 발명하지 않는다.
-- [ ] 실제 채널과 지원 release line이 승인되면 문서 PR만으로 `DONE` 처리한다. repository settings 변경은 섞지 않는다.
+- [x] `SECURITY.md`에 지원 버전, 비공개 신고 경로, 응답 범위, credential/PoC 주의사항을 기록한다.
+- [x] 존재하지 않는 이메일이나 SLA를 발명하지 않는다.
+- [x] 실제 채널과 지원 release line이 승인되면 문서 PR만으로 `DONE` 처리한다. repository settings 변경은 섞지 않는다.
 
 검증: relative links, supported-version table, 실제 승인된 private contact 또는 GitHub reporting URL.
 
+완료 결정(2026-08-31): npm `latest`가 가리키는 최신 minor release line 하나만 security fix를
+지원하며 현재 line은 `0.3.x`다. 이전 minor와 prerelease에는 별도 security support를 약속하지
+않는다. 신고 채널은 GitHub private vulnerability reporting의
+`https://github.com/nestarc/api-keys/security/advisories/new` 하나로 정하고 공개 issue/PR 신고를
+금지했다. maintainer의 triage·추가 정보 요청·수정/공개 조율 범위만 설명하며 고정 응답 또는 수정
+SLA는 약속하지 않는다. 실제 credential, pepper, hash, production tenant data 대신 synthetic
+credential과 최소 PoC를 요구하고 package 고유 security boundary와 비범위를 함께 기록했다.
+
 ### `AK-M17B` — repository security settings
 
-- 상태: `P2 / EXTERNAL (AK-M17A)`
+- 상태: `P2 / DONE`
 
 완료 조건:
 
-- [ ] private vulnerability reporting, Dependabot security updates, secret scanning/push protection 적용 가능성을 관리자 권한에서 결정한다.
-- [ ] main/tag force-push/delete 방지 ruleset과 required checks를 검토한다.
-- [ ] 적용하지 않는 설정은 권한/요금제/제품 결정 사유와 재검토 조건을 기록한다.
+- [x] private vulnerability reporting, Dependabot security updates, secret scanning/push protection 적용 가능성을 관리자 권한에서 결정한다.
+- [x] main/tag force-push/delete 방지 ruleset과 required checks를 검토한다.
+- [x] 적용하지 않는 설정은 권한/요금제/제품 결정 사유와 재검토 조건을 기록한다.
 
 검증: GitHub repository settings/API와 실제 Security 탭 노출. 코드 PR과 별도 evidence로 남긴다.
+
+완료 결정(2026-08-31): repository 관리자 API에서 private vulnerability reporting, Dependabot
+security updates, secret scanning, push protection을 활성화했다. 기존 vulnerability alerts는 이미
+활성 상태였다. `Protect main` ruleset(id `21923571`)은 `main` 삭제와 non-fast-forward update를
+금지하고 현재 CI의 coverage, Node 22/24 verify, PostgreSQL/Prisma, packed consumer 3개, HTTP
+consumer 2개 등 9개 check를 strict required status check로 요구한다. `Protect release tags`
+ruleset(id `21923576`)은 `v*.*.*` 태그의 삭제와 non-fast-forward update를 금지한다. 두 ruleset은
+active이며 bypass actor가 없다. PR approval 수와 signed commit은 현 contributor/release 계약을
+넓히지 않기 위해 추가하지 않았고, 다중 maintainer 운영이나 release signing 정책을 도입할 때
+재검토한다. secret scanning non-provider patterns와 validity checks는 GitHub가 disabled로 유지했으며
+현재 완료 범위인 provider secret scanning/push protection과 별개다. 저장소 설정에서 해당 기능을
+지원·노출하거나 custom secret pattern이 필요해질 때 재검토한다.
 
 ### `AK-M18` — release ancestry와 pack-once provenance
 
@@ -990,9 +1010,9 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
    `.github/workflows/ci.yml`과 `release.yml`에 같은 exact version의 persistent gate를 추가한다.
 4. profile A/B/D와 packed RBAC consumer를 다시 통과시켜 `AK-M06B`를 `DONE` 처리하고,
    tenancy-owned `TEN-ECO-NEXT`에 published package tuple을 인계한다.
-5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`, `AK-M11/12/13/15/16`은 완료됐다.
-   외부 RBAC release를 기다리는 동안 다음 큐 작업은 `AK-M17A` SECURITY/reporting policy
-   결정이다. 비공개 신고 채널과 지원 release line을 관리자와 확정한 뒤 문서 초안을 만든다.
+5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`, `AK-M11/12/13/15/16`,
+   `AK-M17A/B`는 완료됐다. 외부 RBAC release를 기다리는 동안 다음 큐 작업은 `AK-M18`의
+   release ancestry와 pack-once provenance다.
 
 Published RBAC 0.2.1은 `request.apiKeyContext` conflict와 trim/coerce 계약 때문에 의도적으로
 RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증거로 사용하지 않는다.
@@ -1023,6 +1043,8 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-31 | `AK-M13` | `DONE` | `2c93ea5` | `2c93ea5 + worktree` (PR/release 없음) | RED live↔test segment 변조 통과 재현, 12 suites/193 tests, coverage 88.34/84.09/87.17/87.98, PostgreSQL 14/16 + Prisma 5/6/7 각 21 tests, Nest 10/11 HTTP PASS | `AK-M15` list 상태 의미 결정 |
 | 2026-08-31 | `AK-M15` | `DONE` | `98a636a` | `98a636a + worktree` (PR/release 없음) | RED InMemory insertion-order 불일치 재현, 12 suites/194 tests, coverage 88.41/84.08/87.28/88.06, PostgreSQL 14/16 + Prisma 5/6/7 각 22 tests, Nest 10/11 및 no-Prisma packed consumers PASS | AK-M15 변경을 단독 P2 PR로 검토·commit한 뒤 `AK-M16` Date defensive-copy RED contract |
 | 2026-08-31 | `AK-M16` | `DONE` | `846bfe8` | `846bfe8 + worktree` (PR/release 없음) | RED 8 failures, source 12 suites/202 tests, coverage 88.45/84.16/87.50/88.10, PostgreSQL 14/16 + Prisma 5/6/7 각 30 tests PASS | AK-M16 변경을 단독 P2 PR로 검토·commit한 뒤 `AK-M17A` SECURITY/reporting policy 결정 |
+| 2026-08-31 | `AK-M17A` | `DONE` | `20940ff` | `20940ff + worktree` (PR/release 없음) | root SECURITY policy resolver, relative link, supported release table, private reporting URL, SECURITY.md Prettier PASS | SECURITY.md 문서 변경을 검토·commit한 뒤 별도 repository settings evidence 확인 |
+| 2026-08-31 | `AK-M17B` | `DONE` | `20940ff` | GitHub repository settings + rulesets `21923571`, `21923576` | private reporting/Dependabot security updates/secret scanning/push protection enabled, active no-bypass main/tag rulesets API 재조회 PASS | `AK-M18` release ancestry와 pack-once provenance 시작 |
 
 ### AK-M01 종료 인계
 
@@ -1747,4 +1769,63 @@ Unverified paths and reason: 변경 head의 remote GitHub CI/release는 push 전
 External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
 Next exact action: AK-M16 변경 파일만 검토·commit해 단독 P2 PR로 merge한 뒤 `AK-M17A`에서
   비공개 신고 채널과 지원 release line을 관리자와 확정하고 SECURITY.md 초안을 만든다.
+```
+
+### AK-M17A 종료 인계
+
+```text
+Task: AK-M17A
+State: DONE
+Start ref / end ref: 20940ff / 20940ff + session worktree (commit·PR·release 없음)
+Changed files: SECURITY.md, docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: npm latest가 가리키는 최신 minor line 하나만 지원하며 현재는 0.3.x다. GitHub
+  private vulnerability reporting만 비공개 신고 채널로 사용하고 fixed SLA는 약속하지 않는다.
+  실제 credential/production data 대신 synthetic minimal PoC를 요구한다.
+Commands and exact results:
+  resolve_security_md.py --list before edit => repository policy 없음; dependency policy 2개만 확인
+  resolve_security_md.py --scope repository after edit => root SECURITY.md policy chain PASS
+  SECURITY.md relative CHANGELOG.md link existence check => PASS
+  최초 두 Markdown 파일 Prettier check => 둘 다 formatting warning; 범위 밖인 계획 문서 전체
+    rewrite는 하지 않고 SECURITY.md만 write 후 npx prettier --check SECURITY.md => PASS
+  git diff --check => PASS
+Unverified paths and reason: SECURITY.md의 GitHub Security policy tab 렌더링은 push 전이라 미노출.
+  승인된 private reporting endpoint 자체는 AK-M17B에서 API와 로그인 redirect로 확인했다.
+External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
+Next exact action: SECURITY.md 문서 변경을 검토·commit하고 AK-M17B repository settings evidence를
+  별도로 보존한다.
+```
+
+### AK-M17B 종료 인계
+
+```text
+Task: AK-M17B
+State: DONE
+Start ref / end ref: 20940ff / GitHub repository settings + active rulesets
+Changed files: docs/2026-08-30-p0-p3-maintenance-work-plan.md; external GitHub settings
+Contract decision: private reporting, Dependabot security updates, provider secret scanning/push
+  protection을 활성화한다. main은 delete/non-fast-forward와 현재 CI 9 checks를 no-bypass strict
+  ruleset으로 보호하고 v*.*.* tag는 delete/non-fast-forward를 no-bypass로 보호한다. PR approval와
+  signed commit은 현 contribution/release 계약을 넓히므로 추가하지 않는다.
+Commands and exact results:
+  GET private-vulnerability-reporting before => enabled false; PUT => HTTP 204;
+    final GET => enabled true
+  GET vulnerability-alerts => HTTP 204 (already enabled)
+  GET automated-security-fixes before => enabled false; PUT => HTTP 204;
+    final GET => enabled true, paused false
+  PATCH repository security_and_analysis => secret_scanning enabled,
+    secret_scanning_push_protection enabled, dependabot_security_updates enabled
+  POST rulesets => Protect main id 21923571 active, Protect release tags id 21923576 active;
+    final list/detail GET => both active, bypass actors none, intended conditions/rules PASS
+  GET effective rules for main => deletion, non_fast_forward, required_status_checks PASS;
+    tag effective-rules endpoint는 GitHub REST에서 HTTP 404여서 ruleset detail/condition으로 검증
+  reporting URL unauthenticated HEAD => login redirect followed by HTTP 200 login surface;
+    authenticated repository API confirms reporting enabled
+Unverified paths and reason: secret_scanning_non_provider_patterns와 validity_checks는 GitHub가
+  disabled로 유지했다. provider secret scanning/push protection 완료 범위에는 영향이 없으며 해당
+  기능이 repository settings에 지원·노출되거나 custom pattern이 필요할 때 재검토한다.
+External PR/release evidence: GitHub rulesets https://github.com/nestarc/api-keys/rules/21923571,
+  https://github.com/nestarc/api-keys/rules/21923576; private reporting
+  https://github.com/nestarc/api-keys/security/advisories/new
+Next exact action: AK-M18에서 main ancestry failure fixture와 consumer-verified pack-once identity를
+  현재 release workflow graph에 먼저 표현한다.
 ```
