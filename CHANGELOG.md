@@ -65,6 +65,10 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ### Changed
 
+- Define `list()` as a backward-compatible non-revoked management-history query: expired and
+  rotated records remain in the default result, `includeRevoked: true` adds revoked records, and
+  both built-in adapters now order by `createdAt` descending then `id` ascending. Consumers that
+  labeled every default result as active must classify the returned lifecycle timestamps instead.
 - **Breaking in the planned pre-1.0 `0.4.0` release:** `ApiKeysService.list()` now returns
   serialization-safe `ApiKeySummary[]` values instead of internal `ApiKeyRecord[]` values. Hashes
   and pepper versions remain available to storage adapters for verification and rotation but are

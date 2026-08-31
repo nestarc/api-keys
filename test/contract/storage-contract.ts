@@ -76,6 +76,68 @@ export function storageContract(name: string, factory: () => ApiKeyStorage): voi
       expect(listed.map((record) => record.id).sort()).toEqual(['a', 'b']);
     });
 
+    it('keeps non-revoked lifecycle history and orders newest records first', async () => {
+      await storage.insert(
+        fixture({
+          id: 'active_b',
+          prefix: 'activeb00000',
+          createdAt: new Date('2026-01-04T00:00:00Z'),
+        }),
+      );
+      await storage.insert(
+        fixture({
+          id: 'grace',
+          prefix: 'grace0000000',
+          expiresAt: new Date('2026-02-08T00:00:00Z'),
+          rotatedAt: new Date('2026-02-01T00:00:00Z'),
+          replacedByKeyId: 'replacement',
+          createdAt: new Date('2026-01-02T00:00:00Z'),
+        }),
+      );
+      await storage.insert(
+        fixture({
+          id: 'expired',
+          prefix: 'expired00000',
+          expiresAt: new Date('2026-02-01T00:00:00Z'),
+          createdAt: new Date('2026-01-03T00:00:00Z'),
+        }),
+      );
+      await storage.insert(
+        fixture({
+          id: 'revoked',
+          prefix: 'revoked00000',
+          revokedAt: new Date('2026-02-01T00:00:00Z'),
+          createdAt: new Date('2026-01-05T00:00:00Z'),
+        }),
+      );
+      await storage.insert(
+        fixture({
+          id: 'active_a',
+          prefix: 'activea00000',
+          createdAt: new Date('2026-01-04T00:00:00Z'),
+        }),
+      );
+
+      const currentAndHistory = await storage.listByTenant('tenant_1');
+      expect(currentAndHistory.map((record) => record.id)).toEqual([
+        'active_a',
+        'active_b',
+        'expired',
+        'grace',
+      ]);
+
+      const completeHistory = await storage.listByTenant('tenant_1', {
+        includeRevoked: true,
+      });
+      expect(completeHistory.map((record) => record.id)).toEqual([
+        'revoked',
+        'active_a',
+        'active_b',
+        'expired',
+        'grace',
+      ]);
+    });
+
     it('markRevoked sets revokedAt', async () => {
       const record = fixture();
       const revokedAt = new Date('2026-02-01T00:00:00Z');

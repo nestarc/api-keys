@@ -351,10 +351,27 @@ stored hash, pepper version, or raw secret. The internal `ApiKeyRecord` storage 
 contains verifier material so verification and rotation continue to work; do not return
 `storage.listByTenant()` directly from a controller.
 
-The default currently excludes revoked records but retains expired records and old rotation records
-during their grace period. `includeRevoked: true` adds revoked history. Revoked keys remain in
-storage so you can audit historical usage. Use revocation, not grace rotation, when a key is known
-to be compromised.
+Listing is a management-history API, not an authentication predicate. Lifecycle fields have these
+meanings at the time you inspect them:
+
+| State              | Lifecycle fields                                                               | Verifiable at that time | Included by default              |
+| ------------------ | ------------------------------------------------------------------------------ | ----------------------- | -------------------------------- |
+| Active             | `revokedAt` and `rotatedAt` are `null`; `expiresAt` is `null` or in the future | Yes                     | Yes                              |
+| Rotated with grace | `rotatedAt` and `replacedByKeyId` are set; `expiresAt` is in the future        | Yes, until `expiresAt`  | Yes                              |
+| Expired            | `revokedAt` is `null`; `expiresAt` is at or before the current time            | No                      | Yes                              |
+| Revoked            | `revokedAt` is set, regardless of expiry or rotation fields                    | No                      | No; opt in with `includeRevoked` |
+
+Both built-in adapters return records in deterministic `createdAt` descending, then `id` ascending
+order. The default deliberately preserves the existing non-revoked contract: expired records and
+old rotation records remain available for management history, including after a grace period ends.
+`includeRevoked: true` adds revoked history; there is no separate `includeExpired` option. Revoked
+keys remain in storage so you can audit historical usage. Use revocation, not grace rotation, when
+a key is known to be compromised.
+
+Existing consumers do not need to migrate their default query. Applications that labeled every
+default result as "active" must instead classify the lifecycle timestamps using their request time,
+or filter expired and rotated records in their management layer. Do not infer authentication state
+from list membership; call the verification API for credentials presented by a client.
 
 A tenant-bound management controller can safely return the service projection directly:
 

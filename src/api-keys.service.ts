@@ -25,7 +25,7 @@ import {
   copyApiKeyVerificationMetric,
 } from './payload-copy';
 import { flattenScopes, scopeSatisfies } from './scope-matcher';
-import type { ApiKeyStorage } from './storage/api-key-storage.interface';
+import type { ApiKeyStorage, ListApiKeysOptions } from './storage/api-key-storage.interface';
 import type {
   ApiKeyContext,
   ApiKeyAuthorizationMetric,
@@ -577,10 +577,7 @@ export class ApiKeysService {
     throw new Error('failed to generate a unique API key prefix');
   }
 
-  async list(
-    tenantId: string,
-    opts: { includeRevoked?: boolean } = {},
-  ): Promise<ApiKeySummary[]> {
+  async list(tenantId: string, opts: ListApiKeysOptions = {}): Promise<ApiKeySummary[]> {
     const canonicalTenantId = validateTenantId(tenantId);
     const records = await this.storage.listByTenant(canonicalTenantId, opts);
     for (const record of records) {

@@ -63,7 +63,7 @@ export class PrismaApiKeyStorage implements ApiKeyStorage {
 
     const rows = (await this.prisma.apiKey.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
     })) as ApiKeyRecord[];
 
     return rows.map(mapRow);

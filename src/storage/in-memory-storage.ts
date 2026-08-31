@@ -48,7 +48,7 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
       ? records
       : records.filter((record) => record.revokedAt === null);
 
-    return visibleRecords.map(cloneRecord);
+    return visibleRecords.sort(compareRecordsForList).map(cloneRecord);
   }
 
   async markRevoked(id: string, at: Date): Promise<void> {
@@ -127,6 +127,15 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
     this.records.set(input.newRecord.id, cloneRecord(input.newRecord));
     return 'rotated';
   }
+}
+
+function compareRecordsForList(left: ApiKeyRecord, right: ApiKeyRecord): number {
+  const createdAtDifference = right.createdAt.getTime() - left.createdAt.getTime();
+  if (createdAtDifference !== 0) {
+    return createdAtDifference;
+  }
+
+  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
 }
 
 function cloneRecord(record: ApiKeyRecord): ApiKeyRecord {

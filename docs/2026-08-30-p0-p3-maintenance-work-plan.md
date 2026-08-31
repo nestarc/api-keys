@@ -166,10 +166,10 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 9 | `AK-M09` | P1 | `DONE` | M | `AK-M08B`, `AK-M08C` | Node 22/24 지원 계약으로 정렬 |
 | 10 | `AK-M10` | P1 | `DONE` | L | `AK-M09` | Nest/Prisma/PostgreSQL/no-Prisma compatibility 증거 정책 고정 |
 | 11 | `AK-M11` | P1 | `DONE` | S | `AK-M08A`, `AK-M08C` | coverage floor와 CI evidence |
-| 12 | `AK-M15` | P2 | `DECISION` | S | 없음 | list의 active/expired/grace semantics 정렬 |
+| 12 | `AK-M15` | P2 | `DONE` | S | 없음 | list의 active/expired/grace semantics 정렬 |
 | 13 | `AK-M12` | P2 | `DONE` | M | 없음; filter 의미 비변경 | public list DTO에서 verifier material 제거 |
 | 14 | `AK-M13` | P2 | `DONE` | S | `AK-M04` | raw key environment와 stored environment bind |
-| 15 | `AK-M16` | P2 | `BLOCKED` | S | `AK-M05` | InMemory storage record Date defensive copy |
+| 15 | `AK-M16` | P2 | `READY` | S | `AK-M05` | InMemory storage record Date defensive copy |
 | 16A | `AK-M17A` | P2 | `DECISION` | S | 없음 | `SECURITY.md`와 지원 release policy |
 | 16B | `AK-M17B` | P2 | `EXTERNAL` | S | `AK-M17A` | GitHub reporting/security/ruleset 설정 |
 | 17 | `AK-M18` | P2 | `READY` | M | `AK-M08A`, `AK-M09` | release ancestry와 pack-once provenance |
@@ -658,8 +658,9 @@ coverage 수치를 올리기 위한 제품 무관 테스트는 추가하지 않�
 scopes/IP 배열과 Date는 새 객체로 복사하며 storage interface와 verifier/rotation record는 변경하지
 않았다. 기존 `includeRevoked` query를 그대로 전달하므로 default가 revoked만 제외하고 expired 및
 rotation-grace record를 유지하는 현재 동작은 보존한다. 이 보안 projection은 filter 정책 선택과
-독립적이므로 `AK-M15` 선행을 해제했고, active/expired/grace 의미 결정은 여전히 별도 `DECISION`으로
-남긴다. 공개 반환 type narrowing은 계획된 pre-1.0 `0.4.0` breaking change이며 storage adapter의
+독립적이므로 `AK-M15` 선행을 해제했고, active/expired/grace 의미는 이후 `AK-M15`에서
+non-revoked management-history 계약으로 확정했다. 공개 반환 type narrowing은 계획된 pre-1.0
+`0.4.0` breaking change이며 storage adapter의
 `ApiKeyRecord` 계약은 유지한다. README에는 tenant-bound controller가 service 결과를 직접 반환하는
 예제와 storage 결과를 직접 노출하지 말라는 경계를 추가했다.
 
@@ -686,19 +687,29 @@ route의 `@RequireEnvironment` 불일치는 기존대로 각각 성공 및
 
 ### `AK-M15` — list 상태 의미
 
-- 상태: `P2 / DECISION`
+- 상태: `P2 / DONE`
 - 문제: README의 "active keys"와 구현의 "non-revoked keys"가 다르며 expired/rotation grace record가 default 결과에 남는다.
 
 완료 조건:
 
-- [ ] active, revoked, expired, rotated-with-grace 상태를 정의한다.
-- [ ] `includeRevoked`, 새 `includeExpired` 또는 문서 정정 중 호환 가능한 API를 선택한다.
-- [ ] InMemory/Prisma ordering과 filter가 일치한다.
-- [ ] 현재 소비자의 non-revoked 기대를 migration note로 다룬다.
+- [x] active, revoked, expired, rotated-with-grace 상태를 정의한다.
+- [x] `includeRevoked`, 새 `includeExpired` 또는 문서 정정 중 호환 가능한 API를 선택한다.
+- [x] InMemory/Prisma ordering과 filter가 일치한다.
+- [x] 현재 소비자의 non-revoked 기대를 migration note로 다룬다.
+
+완료 결정(2026-08-31): `list()`는 인증 가능 여부를 계산하는 API가 아니라 non-revoked
+management-history API로 유지한다. 평가 시점에 unrevoked·unrotated이고 expiry가 없거나 미래면
+active, unrevoked rotation record의 grace expiry가 미래면 rotated-with-grace, unrevoked record의
+expiry가 현재 이하이면 expired, `revokedAt`이 있으면 다른 timestamp와 무관하게 revoked로 분류한다.
+기본 query는 호환성을 위해 revoked만 제외하고 expired와 rotation record를 grace 종료 뒤에도
+유지한다. `includeRevoked: true`는 revoked history를 더하며 `includeExpired`는 추가하지 않는다.
+두 built-in adapter와 public storage contract의 순서는 `createdAt DESC, id ASC`로 고정했다.
+기존 non-revoked query 소비자는 변경이 없고, default 결과 전체를 "active"로 표시하던 관리 UI만
+반환 timestamp를 평가해 분류·filter해야 한다. README와 changelog에 이 migration note를 기록했다.
 
 ### `AK-M16` — InMemory storage record Date defensive copy
 
-- 상태: `P2 / BLOCKED (AK-M05)`
+- 상태: `P2 / READY (AK-M05 DONE)`
 
 완료 조건:
 
@@ -971,8 +982,9 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
    `.github/workflows/ci.yml`과 `release.yml`에 같은 exact version의 persistent gate를 추가한다.
 4. profile A/B/D와 packed RBAC consumer를 다시 통과시켜 `AK-M06B`를 `DONE` 처리하고,
    tenancy-owned `TEN-ECO-NEXT`에 published package tuple을 인계한다.
-5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`, `AK-M11`은 완료됐다. 외부
-   RBAC release를 기다리는 동안 다음 순서의 실행 가능한 작업은 `AK-M15` list 상태 의미 결정이다.
+5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`, `AK-M11/12/13/15`는 완료됐다.
+   외부 RBAC release를 기다리는 동안 다음 순서의 실행 가능한 작업은 `AK-M16` Date
+   defensive-copy contract다. 선행 `AK-M05`는 이미 완료돼 `READY`다.
 
 Published RBAC 0.2.1은 `request.apiKeyContext` conflict와 trim/coerce 계약 때문에 의도적으로
 RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증거로 사용하지 않는다.
@@ -1001,6 +1013,7 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-31 | `AK-M11` | `DONE` | `7e1dd16` | `7e1dd16 + worktree` (PR/release 없음) | global 88/84/86/87와 4 critical-file floor PASS, 두 intentional regression exit 1, PostgreSQL/Prisma matrix와 packed consumers PASS | `AK-M15` list 상태 의미 결정 |
 | 2026-08-31 | `AK-M12` | `DONE` | `5747de4` | `5747de4 + worktree` (PR/release 없음) | RED serialization 노출 재현, 12 suites/189 tests, coverage 88.27/84.01/87.17/87.90, Nest 10/11 packed type/runtime PASS, build/pack/bench/audit PASS | `AK-M15` list 상태 의미 결정 |
 | 2026-08-31 | `AK-M13` | `DONE` | `2c93ea5` | `2c93ea5 + worktree` (PR/release 없음) | RED live↔test segment 변조 통과 재현, 12 suites/193 tests, coverage 88.34/84.09/87.17/87.98, PostgreSQL 14/16 + Prisma 5/6/7 각 21 tests, Nest 10/11 HTTP PASS | `AK-M15` list 상태 의미 결정 |
+| 2026-08-31 | `AK-M15` | `DONE` | `98a636a` | `98a636a + worktree` (PR/release 없음) | RED InMemory insertion-order 불일치 재현, 12 suites/194 tests, coverage 88.41/84.08/87.28/88.06, PostgreSQL 14/16 + Prisma 5/6/7 각 22 tests, Nest 10/11 및 no-Prisma packed consumers PASS | AK-M15 변경을 단독 P2 PR로 검토·commit한 뒤 `AK-M16` Date defensive-copy RED contract |
 
 ### AK-M01 종료 인계
 
@@ -1653,4 +1666,45 @@ Unverified paths and reason: 변경 head의 remote GitHub CI/release는 push 전
 External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
 Next exact action: AK-M15에서 expired/rotated/revoked key의 현재 default list 결과표를 만들고
   active/expired/grace 제품 계약을 결정한다.
+```
+
+### AK-M15 종료 인계
+
+```text
+Task: AK-M15
+State: DONE
+Start ref / end ref: 98a636a / 98a636a + session worktree (commit·PR·release 없음)
+Changed files: src/api-keys.service.ts, src/storage/api-key-storage.interface.ts,
+  src/storage/in-memory-storage.ts, src/storage/prisma-storage.ts,
+  test/contract/storage-contract.ts, README.md, CHANGELOG.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: list()는 non-revoked management-history API다. revoked가 최우선 상태이며,
+  나머지는 평가 시점의 expiry와 rotation metadata로 active, rotated-with-grace, expired를
+  분류한다. default는 revoked만 제외하고 expired 및 grace 종료 뒤 rotation record도 유지한다.
+  includeRevoked=true만 지원하며 includeExpired는 추가하지 않는다. built-in adapter와 public
+  storage contract는 createdAt DESC, id ASC의 결정적 순서를 사용한다. 기존 non-revoked 소비자는
+  query를 바꾸지 않고, 결과 전체를 active로 표시하던 UI만 timestamp 기반 분류/filter를 적용한다.
+Commands and exact results:
+  RED: npx jest test/integration/in-memory-storage.test.ts --runInBand => 1 suite FAIL,
+    1 failed/16 passed; InMemory가 insertion order를 반환해 Prisma 최신순 계약과 불일치
+  대상 storage/service => 2 suites/109 tests PASS
+  npm run test:coverage => 12 suites/194 tests PASS, global
+    88.41/84.08/87.28/88.06 및 4 critical-file floor PASS
+  npm run lint + npm run build => PASS
+  npm run test:e2e:postgres-matrix => PostgreSQL 14/Prisma 5.22.0 및 PostgreSQL 16/
+    Prisma 5.22.0, 6.19.3, 7.10.0 각각 1 suite/22 tests PASS
+  NPM_CONFIG_CACHE=/tmp/api-keys-akm15-npm-legacy npm run test:consumer:strict:legacy =>
+    exact Nest 10.4.20/Prisma 6.19.3 packed declaration/runtime PASS
+  NPM_CONFIG_CACHE=/tmp/api-keys-akm15-npm-modern npm run test:consumer:strict:modern =>
+    exact Nest 11.2.3/Prisma 7.10.0 packed declaration/runtime PASS
+  NPM_CONFIG_CACHE=/tmp/api-keys-akm15-npm-no-prisma npm run test:consumer:no-prisma =>
+    exact Nest 11.2.3/no-Prisma packed declaration/runtime PASS
+  git diff --check => PASS after final plan update
+Unverified paths and reason: 변경 head의 remote GitHub CI/release는 push 전이라 미실행했다.
+  list/storage management query와 무관한 HTTP consumer, auth benchmark, audit는 재실행하지 않았다.
+  첫 packed consumer 시도는 사용자 npm cache의 기존 root-owned file 때문에 EPERM이었고 작업 전용
+  /tmp cache와 승인된 registry network에서 세 lane을 모두 통과했다.
+External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
+Next exact action: AK-M15 변경 파일만 검토·commit해 단독 P2 PR로 merge한 뒤 `AK-M16`의 Date
+  defensive-copy RED contract를 시작한다.
 ```
