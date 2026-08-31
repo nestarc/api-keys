@@ -17,7 +17,9 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
       throw new Error(`duplicate id: ${record.id}`);
     }
 
-    if ([...this.records.values()].some((existingRecord) => existingRecord.prefix === record.prefix)) {
+    if (
+      [...this.records.values()].some((existingRecord) => existingRecord.prefix === record.prefix)
+    ) {
       throw new Error(`duplicate prefix: ${record.prefix}`);
     }
 
@@ -39,10 +41,7 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
     return null;
   }
 
-  async listByTenant(
-    tenantId: string,
-    opts: ListApiKeysOptions = {},
-  ): Promise<ApiKeyRecord[]> {
+  async listByTenant(tenantId: string, opts: ListApiKeysOptions = {}): Promise<ApiKeyRecord[]> {
     const records = [...this.records.values()].filter((record) => record.tenantId === tenantId);
     const visibleRecords = opts.includeRevoked
       ? records
@@ -57,7 +56,7 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
       throw new Error(`not found: ${id}`);
     }
 
-    record.revokedAt = at;
+    record.revokedAt = cloneDate(at);
   }
 
   async revokeForTenant(
@@ -68,7 +67,7 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
       return 'not_found';
     }
 
-    record.revokedAt = input.revokedAt;
+    record.revokedAt = cloneDate(input.revokedAt);
     return 'revoked';
   }
 
@@ -78,7 +77,7 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
       throw new Error(`not found: ${id}`);
     }
 
-    record.lastUsedAt = at;
+    record.lastUsedAt = cloneDate(at);
   }
 
   async rotate(input: RotateApiKeyStorageInput): Promise<RotateApiKeyStorageResult> {
@@ -103,8 +102,7 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
       oldRecord.revokedAt !== null ||
       oldRecord.rotatedAt !== null ||
       oldRecord.replacedByKeyId !== null ||
-      (oldRecord.expiresAt !== null &&
-        oldRecord.expiresAt.getTime() <= input.rotatedAt.getTime())
+      (oldRecord.expiresAt !== null && oldRecord.expiresAt.getTime() <= input.rotatedAt.getTime())
     ) {
       return 'not_rotatable';
     }
@@ -121,8 +119,8 @@ export class InMemoryApiKeyStorage implements ApiKeyStorage {
       throw new Error(`duplicate prefix: ${input.newRecord.prefix}`);
     }
 
-    oldRecord.expiresAt = input.oldExpiresAt;
-    oldRecord.rotatedAt = input.rotatedAt;
+    oldRecord.expiresAt = cloneDate(input.oldExpiresAt);
+    oldRecord.rotatedAt = cloneDate(input.rotatedAt);
     oldRecord.replacedByKeyId = input.newRecord.id;
     this.records.set(input.newRecord.id, cloneRecord(input.newRecord));
     return 'rotated';
@@ -143,5 +141,18 @@ function cloneRecord(record: ApiKeyRecord): ApiKeyRecord {
     ...record,
     scopes: [...record.scopes],
     allowedIpCidrs: [...(record.allowedIpCidrs ?? [])],
+    lastUsedAt: cloneNullableDate(record.lastUsedAt),
+    expiresAt: cloneNullableDate(record.expiresAt),
+    revokedAt: cloneNullableDate(record.revokedAt),
+    rotatedAt: cloneNullableDate(record.rotatedAt),
+    createdAt: cloneDate(record.createdAt),
   };
+}
+
+function cloneNullableDate(value: Date | null): Date | null {
+  return value === null ? null : cloneDate(value);
+}
+
+function cloneDate(value: Date): Date {
+  return new Date(value.getTime());
 }

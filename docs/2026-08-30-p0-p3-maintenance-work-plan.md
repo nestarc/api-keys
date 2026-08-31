@@ -169,7 +169,7 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 12 | `AK-M15` | P2 | `DONE` | S | 없음 | list의 active/expired/grace semantics 정렬 |
 | 13 | `AK-M12` | P2 | `DONE` | M | 없음; filter 의미 비변경 | public list DTO에서 verifier material 제거 |
 | 14 | `AK-M13` | P2 | `DONE` | S | `AK-M04` | raw key environment와 stored environment bind |
-| 15 | `AK-M16` | P2 | `READY` | S | `AK-M05` | InMemory storage record Date defensive copy |
+| 15 | `AK-M16` | P2 | `DONE` | S | `AK-M05` | InMemory storage record Date defensive copy |
 | 16A | `AK-M17A` | P2 | `DECISION` | S | 없음 | `SECURITY.md`와 지원 release policy |
 | 16B | `AK-M17B` | P2 | `EXTERNAL` | S | `AK-M17A` | GitHub reporting/security/ruleset 설정 |
 | 17 | `AK-M18` | P2 | `READY` | M | `AK-M08A`, `AK-M09` | release ancestry와 pack-once provenance |
@@ -709,14 +709,22 @@ expiry가 현재 이하이면 expired, `revokedAt`이 있으면 다른 timestamp
 
 ### `AK-M16` — InMemory storage record Date defensive copy
 
-- 상태: `P2 / READY (AK-M05 DONE)`
+- 상태: `P2 / DONE`
 
 완료 조건:
 
-- [ ] insert/find/list/rotate/revoke/touch 경계에서 모든 nullable Date를 복사한다.
-- [ ] input 또는 반환 record의 Date mutation이 저장 상태에 영향을 주지 않는다.
-- [ ] Prisma와 동일한 observable storage semantics를 contract suite로 고정한다.
-- [ ] 이 작업은 adapter record의 Date ownership만 다룬다. event/context whole-object 불변성은 `AK-M05`를 다시 수정하지 않고 그 gate를 재사용한다.
+- [x] insert/find/list/rotate/revoke/touch 경계에서 모든 nullable Date를 복사한다.
+- [x] input 또는 반환 record의 Date mutation이 저장 상태에 영향을 주지 않는다.
+- [x] Prisma와 동일한 observable storage semantics를 contract suite로 고정한다.
+- [x] 이 작업은 adapter record의 Date ownership만 다룬다. event/context whole-object 불변성은 `AK-M05`를 다시 수정하지 않고 그 gate를 재사용한다.
+
+완료 결정(2026-08-31): InMemory adapter는 insert와 rotate replacement 저장 시 nullable lifecycle
+Date 네 개와 `createdAt`을 복사하고, findById/findByPrefix/listByTenant 반환 시에도 새 Date instance를
+제공한다. markRevoked/revokeForTenant/touchLastUsed/rotate의 Date 인자도 mutation 전에 복사해 caller와
+저장 상태 사이의 참조 공유를 제거한다. public type을 readonly로 바꾸거나 record를 freeze하지 않고
+adapter 경계의 runtime defensive copy만 적용했다. 같은 mutation contract를 공용 storage suite에 두고
+PostgreSQL 14/16 및 Prisma 5/6/7에서 observable parity를 확인했으며 AK-M05 event/context gate는 전체
+source suite로 재검증했다.
 
 ### `AK-M17A` — SECURITY와 reporting policy
 
@@ -982,9 +990,9 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
    `.github/workflows/ci.yml`과 `release.yml`에 같은 exact version의 persistent gate를 추가한다.
 4. profile A/B/D와 packed RBAC consumer를 다시 통과시켜 `AK-M06B`를 `DONE` 처리하고,
    tenancy-owned `TEN-ECO-NEXT`에 published package tuple을 인계한다.
-5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`, `AK-M11/12/13/15`는 완료됐다.
-   외부 RBAC release를 기다리는 동안 다음 순서의 실행 가능한 작업은 `AK-M16` Date
-   defensive-copy contract다. 선행 `AK-M05`는 이미 완료돼 `READY`다.
+5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`, `AK-M11/12/13/15/16`은 완료됐다.
+   외부 RBAC release를 기다리는 동안 다음 큐 작업은 `AK-M17A` SECURITY/reporting policy
+   결정이다. 비공개 신고 채널과 지원 release line을 관리자와 확정한 뒤 문서 초안을 만든다.
 
 Published RBAC 0.2.1은 `request.apiKeyContext` conflict와 trim/coerce 계약 때문에 의도적으로
 RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증거로 사용하지 않는다.
@@ -1014,6 +1022,7 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-31 | `AK-M12` | `DONE` | `5747de4` | `5747de4 + worktree` (PR/release 없음) | RED serialization 노출 재현, 12 suites/189 tests, coverage 88.27/84.01/87.17/87.90, Nest 10/11 packed type/runtime PASS, build/pack/bench/audit PASS | `AK-M15` list 상태 의미 결정 |
 | 2026-08-31 | `AK-M13` | `DONE` | `2c93ea5` | `2c93ea5 + worktree` (PR/release 없음) | RED live↔test segment 변조 통과 재현, 12 suites/193 tests, coverage 88.34/84.09/87.17/87.98, PostgreSQL 14/16 + Prisma 5/6/7 각 21 tests, Nest 10/11 HTTP PASS | `AK-M15` list 상태 의미 결정 |
 | 2026-08-31 | `AK-M15` | `DONE` | `98a636a` | `98a636a + worktree` (PR/release 없음) | RED InMemory insertion-order 불일치 재현, 12 suites/194 tests, coverage 88.41/84.08/87.28/88.06, PostgreSQL 14/16 + Prisma 5/6/7 각 22 tests, Nest 10/11 및 no-Prisma packed consumers PASS | AK-M15 변경을 단독 P2 PR로 검토·commit한 뒤 `AK-M16` Date defensive-copy RED contract |
+| 2026-08-31 | `AK-M16` | `DONE` | `846bfe8` | `846bfe8 + worktree` (PR/release 없음) | RED 8 failures, source 12 suites/202 tests, coverage 88.45/84.16/87.50/88.10, PostgreSQL 14/16 + Prisma 5/6/7 각 30 tests PASS | AK-M16 변경을 단독 P2 PR로 검토·commit한 뒤 `AK-M17A` SECURITY/reporting policy 결정 |
 
 ### AK-M01 종료 인계
 
@@ -1707,4 +1716,35 @@ Unverified paths and reason: 변경 head의 remote GitHub CI/release는 push 전
 External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
 Next exact action: AK-M15 변경 파일만 검토·commit해 단독 P2 PR로 merge한 뒤 `AK-M16`의 Date
   defensive-copy RED contract를 시작한다.
+```
+
+### AK-M16 종료 인계
+
+```text
+Task: AK-M16
+State: DONE
+Start ref / end ref: 846bfe8 / 846bfe8 + session worktree (commit·PR·release 없음)
+Changed files: src/storage/in-memory-storage.ts, test/contract/storage-contract.ts,
+  CHANGELOG.md, docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: InMemory adapter에 들어오거나 반환되는 nullable lifecycle Date 네 개와
+  createdAt을 값 복사한다. public type readonly 전환과 runtime freeze는 하지 않는다. 같은 mutation
+  contract를 InMemory와 실제 Prisma adapter가 공유해 observable storage semantics를 고정한다.
+Commands and exact results:
+  RED: npm test -- --runInBand test/integration/in-memory-storage.test.ts
+    => 1 suite, 8 failed/17 passed; insert/findById/findByPrefix/listByTenant/markRevoked/
+       revokeForTenant/touchLastUsed/rotate Date alias 재현
+  GREEN: npm test -- --runInBand test/integration/in-memory-storage.test.ts
+    => 1 suite, 25 tests PASS
+  npm test -- --runInBand => 12 suites, 202 tests PASS (AK-M05 event/context gate 포함)
+  npm run test:coverage -- --coverageDirectory=/tmp/api-keys-akm16-coverage
+    => statements 88.45%, branches 84.16%, functions 87.50%, lines 88.10%; floor PASS
+  npm run test:e2e:postgres-matrix => PostgreSQL 14/Prisma 5.22.0 및 PostgreSQL 16/
+    Prisma 5.22.0, 6.19.3, 7.10.0 각 1 suite, 30 tests PASS
+  npm run lint -- --no-cache + npm run build + Prettier check + git diff --check => PASS
+Unverified paths and reason: 변경 head의 remote GitHub CI/release는 push 전이라 미실행했다.
+  public declaration, package metadata, HTTP/Guard 계약을 바꾸지 않아 packed consumer와 HTTP consumer,
+  auth benchmark는 재실행하지 않았다.
+External PR/release evidence: 없음; 사용자 요청 범위에서 commit/PR/publish는 수행하지 않았다.
+Next exact action: AK-M16 변경 파일만 검토·commit해 단독 P2 PR로 merge한 뒤 `AK-M17A`에서
+  비공개 신고 채널과 지원 release line을 관리자와 확정하고 SECURITY.md 초안을 만든다.
 ```

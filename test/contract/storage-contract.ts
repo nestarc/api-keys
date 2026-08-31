@@ -23,6 +23,28 @@ function fixture(overrides: Partial<ApiKeyRecord> = {}): ApiKeyRecord {
   };
 }
 
+const recordDateFields = [
+  'lastUsedAt',
+  'expiresAt',
+  'revokedAt',
+  'rotatedAt',
+  'createdAt',
+] as const;
+
+function mutateRecordDates(record: ApiKeyRecord): void {
+  for (const field of recordDateFields) {
+    record[field]?.setUTCFullYear(2040);
+  }
+}
+
+function recordDateValues(
+  record: ApiKeyRecord,
+): Record<(typeof recordDateFields)[number], number | null> {
+  return Object.fromEntries(
+    recordDateFields.map((field) => [field, record[field]?.getTime() ?? null]),
+  ) as Record<(typeof recordDateFields)[number], number | null>;
+}
+
 export function storageContract(name: string, factory: () => ApiKeyStorage): void {
   describe(`ApiKeyStorage contract: ${name}`, () => {
     let storage: ApiKeyStorage;
@@ -39,6 +61,50 @@ export function storageContract(name: string, factory: () => ApiKeyStorage): voi
       const found = await storage.findByPrefix(record.prefix);
       expect(found?.id).toBe('key_1');
       expect(found?.allowedIpCidrs).toEqual(['203.0.113.0/24']);
+    });
+
+    it('copies record dates when inserting', async () => {
+      const record = fixture({
+        lastUsedAt: new Date('2026-01-02T00:00:00Z'),
+        expiresAt: new Date('2026-02-01T00:00:00Z'),
+        revokedAt: new Date('2026-01-05T00:00:00Z'),
+        rotatedAt: new Date('2026-01-04T00:00:00Z'),
+      });
+      const expectedDates = recordDateValues(record);
+
+      await storage.insert(record);
+      mutateRecordDates(record);
+
+      const stored = await storage.findById(record.id);
+      expect(stored).not.toBeNull();
+      expect(recordDateValues(stored!)).toEqual(expectedDates);
+    });
+
+    it.each([
+      ['findById', async (record: ApiKeyRecord) => storage.findById(record.id)],
+      ['findByPrefix', async (record: ApiKeyRecord) => storage.findByPrefix(record.prefix)],
+      [
+        'listByTenant',
+        async (record: ApiKeyRecord) =>
+          (await storage.listByTenant(record.tenantId, { includeRevoked: true }))[0] ?? null,
+      ],
+    ] as const)('copies record dates returned by %s', async (_method, loadRecord) => {
+      const record = fixture({
+        lastUsedAt: new Date('2026-01-02T00:00:00Z'),
+        expiresAt: new Date('2026-02-01T00:00:00Z'),
+        revokedAt: new Date('2026-01-05T00:00:00Z'),
+        rotatedAt: new Date('2026-01-04T00:00:00Z'),
+      });
+      const expectedDates = recordDateValues(record);
+      await storage.insert(record);
+
+      const returned = await loadRecord(record);
+      expect(returned).not.toBeNull();
+      mutateRecordDates(returned!);
+
+      const stored = await storage.findById(record.id);
+      expect(stored).not.toBeNull();
+      expect(recordDateValues(stored!)).toEqual(expectedDates);
     });
 
     it('findByPrefix returns null when absent', async () => {
@@ -149,6 +215,19 @@ export function storageContract(name: string, factory: () => ApiKeyStorage): voi
       expect(found?.revokedAt?.toISOString()).toBe(revokedAt.toISOString());
     });
 
+    it('copies the Date passed to markRevoked', async () => {
+      const record = fixture();
+      const revokedAt = new Date('2026-02-01T00:00:00Z');
+
+      await storage.insert(record);
+      await storage.markRevoked(record.id, revokedAt);
+      revokedAt.setUTCFullYear(2040);
+
+      await expect(storage.findById(record.id)).resolves.toMatchObject({
+        revokedAt: new Date('2026-02-01T00:00:00Z'),
+      });
+    });
+
     it('tenant-bound revoke mutates only the exact tenant record', async () => {
       const record = fixture({ tenantId: 'tenant_a' });
       const revokedAt = new Date('2026-02-01T00:00:00Z');
@@ -177,6 +256,27 @@ export function storageContract(name: string, factory: () => ApiKeyStorage): voi
       await expect(storage.findById(record.id)).resolves.toMatchObject({ revokedAt });
     });
 
+    it('copies the Date passed to tenant-bound revoke', async () => {
+      const record = fixture({ tenantId: 'tenant_a' });
+      const revokedAt = new Date('2026-02-01T00:00:00Z');
+      await storage.insert(record);
+
+      if (!storage.revokeForTenant) {
+        throw new Error('built-in storage must implement revokeForTenant');
+      }
+
+      await storage.revokeForTenant({
+        keyId: record.id,
+        expectedTenantId: record.tenantId,
+        revokedAt,
+      });
+      revokedAt.setUTCFullYear(2040);
+
+      await expect(storage.findById(record.id)).resolves.toMatchObject({
+        revokedAt: new Date('2026-02-01T00:00:00Z'),
+      });
+    });
+
     it('touchLastUsed updates lastUsedAt', async () => {
       const record = fixture();
       const lastUsedAt = new Date('2026-02-02T00:00:00Z');
@@ -186,6 +286,19 @@ export function storageContract(name: string, factory: () => ApiKeyStorage): voi
 
       const found = await storage.findByPrefix(record.prefix);
       expect(found?.lastUsedAt?.toISOString()).toBe(lastUsedAt.toISOString());
+    });
+
+    it('copies the Date passed to touchLastUsed', async () => {
+      const record = fixture();
+      const lastUsedAt = new Date('2026-02-02T00:00:00Z');
+
+      await storage.insert(record);
+      await storage.touchLastUsed(record.id, lastUsedAt);
+      lastUsedAt.setUTCFullYear(2040);
+
+      await expect(storage.findById(record.id)).resolves.toMatchObject({
+        lastUsedAt: new Date('2026-02-02T00:00:00Z'),
+      });
     });
 
     it('rotate inserts the new record and expires the old record', async () => {
@@ -226,6 +339,40 @@ export function storageContract(name: string, factory: () => ApiKeyStorage): voi
         rotatedAt: null,
         replacedByKeyId: null,
       });
+    });
+
+    it('copies all Date inputs passed to rotate', async () => {
+      const oldRecord = fixture({ id: 'old_key', prefix: 'oldprefix001' });
+      const newRecord = fixture({
+        id: 'new_key',
+        prefix: 'newprefix001',
+        lastUsedAt: new Date('2026-01-12T00:00:00Z'),
+        expiresAt: new Date('2026-04-01T00:00:00Z'),
+        revokedAt: new Date('2026-01-15T00:00:00Z'),
+        rotatedAt: new Date('2026-01-14T00:00:00Z'),
+        createdAt: new Date('2026-01-10T00:00:00Z'),
+      });
+      const expectedNewRecordDates = recordDateValues(newRecord);
+      const rotatedAt = new Date('2026-02-01T00:00:00Z');
+      const oldExpiresAt = new Date('2026-02-08T00:00:00Z');
+
+      await storage.insert(oldRecord);
+      await expect(
+        storage.rotate({ oldKeyId: oldRecord.id, newRecord, oldExpiresAt, rotatedAt }),
+      ).resolves.toBe('rotated');
+
+      mutateRecordDates(newRecord);
+      oldExpiresAt.setUTCFullYear(2040);
+      rotatedAt.setUTCFullYear(2040);
+
+      const storedOldRecord = await storage.findById(oldRecord.id);
+      const storedNewRecord = await storage.findById(newRecord.id);
+      expect(storedOldRecord).toMatchObject({
+        expiresAt: new Date('2026-02-08T00:00:00Z'),
+        rotatedAt: new Date('2026-02-01T00:00:00Z'),
+      });
+      expect(storedNewRecord).not.toBeNull();
+      expect(recordDateValues(storedNewRecord!)).toEqual(expectedNewRecordDates);
     });
 
     it('tenant-bound rotation atomically rejects a different tenant', async () => {
@@ -293,9 +440,7 @@ export function storageContract(name: string, factory: () => ApiKeyStorage): voi
 
       const results = await Promise.all(attempts);
       expect(results.filter((result) => result === 'rotated')).toHaveLength(1);
-      expect(results.filter((result) => result === 'not_rotatable')).toHaveLength(
-        attemptCount - 1,
-      );
+      expect(results.filter((result) => result === 'not_rotatable')).toHaveLength(attemptCount - 1);
 
       const oldFound = await storage.findById(oldRecord.id);
       expect(oldFound?.replacedByKeyId).not.toBeNull();

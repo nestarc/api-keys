@@ -27,6 +27,10 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ### Fixed
 
+- Defensively copy every `Date` entering or leaving `InMemoryApiKeyStorage`, including insert,
+  lookup, list, revoke, touch, and rotation boundaries, so caller mutation cannot alter persisted
+  lifecycle state. The shared storage contract fixes the same observable semantics across the
+  in-memory and Prisma adapters.
 - Authenticate a known prefix's secret before revealing revoked or expired lifecycle state;
   wrong secrets now consistently fail with `api_key_invalid` while unknown and known-prefix
   failure paths both perform bounded hash/compare work.
