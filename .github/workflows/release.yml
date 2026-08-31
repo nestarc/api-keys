@@ -91,8 +91,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs: prepare-release
-    env:
-      API_KEYS_PACKAGE_CANDIDATE_DIR: /tmp/api-keys-release-candidate
     strategy:
       fail-fast: false
       matrix:
@@ -117,6 +115,8 @@ jobs:
           path: ${{ runner.temp }}/api-keys-release-candidate
 
       - run: npm run ${{ matrix.script }}
+        env:
+          API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
 
   verify-postgres:
     name: PostgreSQL 14/16 and Prisma 5/6/7
@@ -139,8 +139,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: prepare-release
-    env:
-      API_KEYS_PACKAGE_CANDIDATE_DIR: /tmp/api-keys-release-candidate
     strategy:
       fail-fast: false
       matrix:
@@ -161,16 +159,18 @@ jobs:
           path: ${{ runner.temp }}/api-keys-release-candidate
 
       - run: npm run test:consumer:strict:nest12
+        env:
+          API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
 
       - run: npm run test:consumer:http:nest12
+        env:
+          API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
 
   verify-packed-consumer:
     name: packed consumer (${{ matrix.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs: prepare-release
-    env:
-      API_KEYS_PACKAGE_CANDIDATE_DIR: /tmp/api-keys-release-candidate
     strategy:
       fail-fast: false
       matrix:
@@ -201,6 +201,8 @@ jobs:
           path: ${{ runner.temp }}/api-keys-release-candidate
 
       - run: npm run ${{ matrix.script }}
+        env:
+          API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
 
   publish:
     name: publish to npm
