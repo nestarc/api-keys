@@ -7,7 +7,7 @@ const { resolveConsumerCandidate } = require('./package-candidate');
 
 const projectRoot = path.resolve(__dirname, '..');
 const NEST_VERSION = '11.2.3';
-const EXPECTED_NEST_PEER = '^10.0.0 || ^11.0.0';
+const EXPECTED_NEST_PEER = '^10.0.0 || ^11.0.0 || ^12.0.0';
 const EXPECTED_PRISMA_PEER = '^5.0.0 || ^6.0.0 || ^7.0.0';
 
 function run(command, args, options = {}) {
@@ -238,7 +238,7 @@ function main() {
       fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'),
     );
     if (packedPackage.peerDependencies['@nestjs/common'] !== EXPECTED_NEST_PEER) {
-      throw new Error('Packed peer metadata does not declare the verified Nest 10/11 range');
+      throw new Error('Packed peer metadata does not declare the verified Nest 10/11/12 range');
     }
     if (packedPackage.peerDependencies['@prisma/client'] !== EXPECTED_PRISMA_PEER) {
       throw new Error('Packed peer metadata does not declare the verified Prisma 5/6/7 range');

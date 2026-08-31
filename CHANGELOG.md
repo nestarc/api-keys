@@ -10,7 +10,13 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-31
+
 ### Added
+
+- Support NestJS 12 through exact 12.0.1 strict declaration/DI and HTTP Guard consumers on Node
+  22.13.0 and Node 24, and expand the Nest peers to `^10.0.0 || ^11.0.0 || ^12.0.0` only with the
+  persistent CI/release evidence in place.
 
 - Export the framework-independent `runApiKeyStorageContract()` runner and
   `ApiKeyStorageContractError` from the package root. A strict packed no-Prisma consumer compiles
@@ -32,6 +38,9 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
   `api_key.authorization_denied` event and optional `api_key.authorization` metric instead.
 
 ### Fixed
+
+- Bridge CommonJS declarations to Nest 12's ESM types with explicit type-import resolution while
+  retaining one CommonJS runtime and shared `require`/native ESM class and injection-token identity.
 
 - Defensively copy every `Date` entering or leaving `InMemoryApiKeyStorage`, including insert,
   lookup, list, revoke, touch, and rotation boundaries, so caller mutation cannot alter persisted
@@ -78,7 +87,11 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
 
 ### Changed
 
-- **Breaking in the planned pre-1.0 `0.4.0` release:** add an explicit package `exports` map.
+- **Breaking in `0.4.0`:** declaration consumers now need TypeScript
+  5.3 or newer, where `resolution-mode` on type imports is stable. TypeScript 5.2 and older users
+  must upgrade their compiler before adopting this release.
+
+- **Breaking in `0.4.0`:** add an explicit package `exports` map.
   CommonJS `require` and native ESM `import` share the existing CommonJS runtime and root
   declarations; Prisma schema/config examples remain exact public subpaths, while undocumented
   `dist/**` deep imports are blocked. Deep-import consumers must migrate to package-root exports.
@@ -90,30 +103,30 @@ that heading to the version and date, then re-add an empty `[Unreleased]` block.
   rotated records remain in the default result, `includeRevoked: true` adds revoked records, and
   both built-in adapters now order by `createdAt` descending then `id` ascending. Consumers that
   labeled every default result as active must classify the returned lifecycle timestamps instead.
-- **Breaking in the planned pre-1.0 `0.4.0` release:** `ApiKeysService.list()` now returns
+- **Breaking in `0.4.0`:** `ApiKeysService.list()` now returns
   serialization-safe `ApiKeySummary[]` values instead of internal `ApiKeyRecord[]` values. Hashes
   and pepper versions remain available to storage adapters for verification and rotation but are
   no longer enumerable or declared on the public management projection. Consumers must stop
   reading verifier material from `list()`; custom `ApiKeyStorage` implementations are unchanged.
-- **Breaking in the planned pre-1.0 `0.4.0` release:** support Node.js `^22.13.0 || ^24.0.0` and
+- **Breaking in `0.4.0`:** support Node.js `^22.13.0 || ^24.0.0` and
   move the source matrix to the exact Node 22.13.0 minimum plus Node 24. Node 20 users must upgrade
   their application runtime before upgrading this package. Unlisted future Node majors, including
   Node 26, remain outside the engine range until they are added to the tested matrix.
-- **Breaking in the planned pre-1.0 `0.4.0` release:** custom `ApiKeyStorage.rotate()`
+- **Breaking in `0.4.0`:** custom `ApiKeyStorage.rotate()`
   implementations must atomically return `'rotated'` or `'not_rotatable'`. Legacy `Promise<void>`
   adapters fail fast and must migrate; this change will not be published as a `0.3.x` patch.
-- **Breaking in the planned pre-1.0 `0.4.0` release:** namespaces are limited to 1–32 ASCII
+- **Breaking in `0.4.0`:** namespaces are limited to 1–32 ASCII
   letters or digits. Deployments using punctuation or longer namespaces must reissue credentials
   under an alphanumeric namespace before upgrading; use the prior package version during the
   overlap because the new module and direct service constructor fail fast on the old namespace.
   Namespace values containing `_` already produced credentials that the four-segment parser could
   not consume and must also be replaced. Namespace values are rejected rather than normalized so
   credential identity never changes silently.
-- **Breaking in the planned pre-1.0 `0.4.0` release:** newly issued scope resources must follow
+- **Breaking in `0.4.0`:** newly issued scope resources must follow
   the documented 1–128 character grammar and use the reserved `:` only as the resource/level
   separator. Existing stored keys keep their scope strings, but callers issuing new keys with
   whitespace or other punctuation must migrate those resource names before upgrading.
-- **Breaking in the planned pre-1.0 `0.4.0` release:** tenant IDs are opaque exact strings limited
+- **Breaking in `0.4.0`:** tenant IDs are opaque exact strings limited
   to 1–255 UTF-16 code units with no leading or trailing whitespace. Existing non-canonical records must
   be migrated with their tenancy/RBAC references or have their credentials reissued; values are
   never normalized at runtime. Custom adapters must implement the optional tenant-bound revoke and

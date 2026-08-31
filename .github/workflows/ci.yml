@@ -144,3 +144,25 @@ jobs:
       - run: npm ci
 
       - run: npm run ${{ matrix.script }}
+
+  nest12-compatibility:
+    name: Nest 12 compatibility (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.13.0', '24']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run test:consumer:strict:nest12
+
+      - run: npm run test:consumer:http:nest12

@@ -134,6 +134,36 @@ jobs:
 
       - run: npm run test:e2e:postgres-matrix
 
+  verify-nest12:
+    name: Nest 12 compatibility (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: prepare-release
+    env:
+      API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.13.0', '24']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+
+      - run: npm ci
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/api-keys-release-candidate
+
+      - run: npm run test:consumer:strict:nest12
+
+      - run: npm run test:consumer:http:nest12
+
   verify-packed-consumer:
     name: packed consumer (${{ matrix.name }})
     runs-on: ubuntu-latest
@@ -176,7 +206,15 @@ jobs:
     name: publish to npm
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [prepare-release, verify-coverage, verify-postgres, verify-packed-consumer, verify-http]
+    needs:
+      [
+        prepare-release,
+        verify-coverage,
+        verify-postgres,
+        verify-packed-consumer,
+        verify-http,
+        verify-nest12,
+      ]
     environment: npm
     permissions:
       contents: read

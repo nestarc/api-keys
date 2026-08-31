@@ -1,16 +1,15 @@
-import { CanActivate, ExecutionContext, Inject, Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import type { CanActivate, ExecutionContext } from '@nestjs/common' with {
+  'resolution-mode': 'import',
+};
 import { Reflector } from '@nestjs/core';
+import type { Reflector as ReflectorType } from '@nestjs/core' with {
+  'resolution-mode': 'import',
+};
 import { ApiKeysService } from './api-keys.service';
-import {
-  API_KEY_CONTEXT_PROPERTY,
-  API_KEY_CONTEXT_WRITER,
-  ApiKeyContextWriter,
-} from './context';
+import { API_KEY_CONTEXT_PROPERTY, API_KEY_CONTEXT_WRITER, ApiKeyContextWriter } from './context';
 import { ENVIRONMENT_METADATA } from './decorators/require-environment.decorator';
-import {
-  RequiredScope,
-  SCOPE_METADATA,
-} from './decorators/require-scope.decorator';
+import { RequiredScope, SCOPE_METADATA } from './decorators/require-scope.decorator';
 import {
   API_KEY_CLIENT_IP_RESOLVER,
   ApiKeyClientIpResolver,
@@ -25,7 +24,8 @@ export { API_KEY_CONTEXT_PROPERTY };
 export class ApiKeysGuard implements CanActivate {
   constructor(
     private readonly service: ApiKeysService,
-    private readonly reflector: Reflector,
+    @Inject(Reflector)
+    private readonly reflector: ReflectorType,
     @Optional()
     @Inject(API_KEY_CONTEXT_WRITER)
     private readonly contextWriter?: ApiKeyContextWriter,

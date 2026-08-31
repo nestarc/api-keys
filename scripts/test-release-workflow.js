@@ -109,7 +109,7 @@ function main() {
   requireMatch(workflow, /name: release-candidate/, 'candidate artifact name is unstable');
   requireMatch(workflow, /retention-days: 1/, 'candidate retention must be intentionally short');
 
-  for (const job of ['verify-http', 'verify-packed-consumer', 'publish']) {
+  for (const job of ['verify-http', 'verify-nest12', 'verify-packed-consumer', 'publish']) {
     const start = workflow.indexOf(`  ${job}:`);
     assert.notEqual(start, -1, `${job} job is missing`);
     const remaining = workflow.slice(start + 3);
@@ -178,6 +178,29 @@ function main() {
       source.split('test:consumer:module-formats').length - 1,
       1,
       `${name} must run the CommonJS/native ESM packed consumer once`,
+    );
+  }
+
+  for (const [name, source, jobName] of [
+    ['CI', ciWorkflow, 'nest12-compatibility'],
+    ['release', workflow, 'verify-nest12'],
+  ]) {
+    const job = jobBodies(source).find((candidate) => candidate.name === jobName);
+    assert.ok(job, `${name} Nest 12 compatibility job is missing`);
+    requireMatch(
+      job.body,
+      /node: \['22\.13\.0', '24'\]/,
+      `${name} Nest 12 job must cover exact Node 22.13.0 and Node 24`,
+    );
+    requireMatch(
+      job.body,
+      /npm run test:consumer:strict:nest12/,
+      `${name} Nest 12 strict consumer is missing`,
+    );
+    requireMatch(
+      job.body,
+      /npm run test:consumer:http:nest12/,
+      `${name} Nest 12 HTTP consumer is missing`,
     );
   }
 

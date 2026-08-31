@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-30
 - Owner task: `AK-M10`
+- Updated: 2026-08-31 by `AK-M24`
 - Applies to: the planned `@nestarc/api-keys` 0.4.x support contract
 
 ## Decision
@@ -16,6 +17,7 @@ not added to public peer metadata before that evidence exists.
 | -------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | NestJS 10      | 10.4.20 packed strict consumer with Prisma 6.19.3; 10.4.20 packed HTTP consumer                         | Strict npm peer resolution, public declaration typecheck, application-context runtime, and default HTTP Guard/exception behavior                         |
 | NestJS 11      | 11.2.3 full source suite; 11.2.3 packed strict consumer with Prisma 7.10.0; 11.2.3 packed HTTP consumer | Development baseline plus the same packed and HTTP boundaries as NestJS 10                                                                               |
+| NestJS 12      | 12.0.1 packed strict consumer with Prisma 7.10.0; 12.0.1 packed HTTP consumer on Node 22.13.0 and 24    | ESM declaration bridge, strict install/typecheck, application-context runtime, and default HTTP Guard/exception behavior on both supported Node versions |
 | Prisma 5       | 5.22.0 CLI/client against PostgreSQL 14 and 16                                                          | Lowest Prisma and PostgreSQL boundary plus current PostgreSQL storage contract                                                                           |
 | Prisma 6       | 6.19.3 CLI/client against PostgreSQL 16                                                                 | Real generated-client storage contract; legacy packed representative pairs it with NestJS 10                                                             |
 | Prisma 7       | 7.10.0 CLI/client/`@prisma/adapter-pg` against PostgreSQL 16                                            | Real generated-client and driver-adapter storage contract; modern packed representative pairs it with NestJS 11                                          |
@@ -24,9 +26,9 @@ not added to public peer metadata before that evidence exists.
 | Prisma omitted | NestJS 11.2.3 packed root consumer with no `@prisma/client` lock/install entry                          | Strict install, public declaration typecheck with `skipLibCheck: false`, root import, Nest application-context boot, and in-memory create/verify runtime |
 | Module format  | NestJS 11.2.3 packed no-Prisma CommonJS/native ESM consumer                                             | Exact `exports` metadata, shared loader identity, NodeNext declaration compile, public asset resolution, and private deep-import rejection               |
 
-The source suite runs on exact Node.js 22.13.0 and Node 24. The DB and packed-consumer lanes run on
-the exact supported Node.js minimum, 22.13.0, so a transitive engine-floor increase fails before
-release. The separate Node support decision is recorded in
+The source suite and Nest 12 strict/HTTP consumers run on exact Node.js 22.13.0 and Node 24. The DB
+and other packed-consumer lanes run on the exact supported Node.js minimum, 22.13.0, so a
+transitive engine-floor increase fails before release. The separate Node support decision is recorded in
 [`2026-08-30-node-support-policy-adr.md`](./2026-08-30-node-support-policy-adr.md).
 
 ## Matrix shape
@@ -35,7 +37,9 @@ NestJS integration and Prisma integration meet different public boundaries. Nest
 module, service, Guard, decorators, errors, and storage interface. `PrismaApiKeyStorage` consumes a
 structural `PrismaLike` client and does not import NestJS runtime APIs. Therefore the two packed
 legacy/modern representatives are retained, but NestJS 10 + Prisma 7 and NestJS 11 + Prisma 6 are
-not permanent off-diagonal lanes.
+not permanent off-diagonal lanes. NestJS 12 + Prisma 7 is a targeted additional lane because Nest
+12's ESM package classification exercises a declaration and Node loader boundary absent from Nest
+10/11; it runs on both supported Node versions.
 
 This is not a claim that untested combinations are intrinsically safe. A dependency release or
 code change that couples the two boundaries must add a targeted off-diagonal smoke test. A failure
@@ -53,10 +57,12 @@ NestJS and the four selected lanes cover both version boundaries and all Prisma 
 npm run test:e2e:postgres-matrix
 npm run test:consumer:strict:legacy
 npm run test:consumer:strict:modern
+npm run test:consumer:strict:nest12
 npm run test:consumer:no-prisma
 npm run test:consumer:module-formats
 npm run test:consumer:http:nest10
 npm run test:consumer:http:nest11
+npm run test:consumer:http:nest12
 ```
 
 `test:e2e:postgres-matrix` requires Docker. It creates isolated exact Prisma runtime roots for

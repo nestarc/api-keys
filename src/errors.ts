@@ -1,5 +1,9 @@
 import { HttpException } from '@nestjs/common';
 
+const HttpExceptionBase: typeof import('@nestjs/common', {
+  with: { 'resolution-mode': 'import' },
+}).HttpException = HttpException;
+
 export const ApiKeyErrorCode = {
   Missing: 'api_key_missing',
   Malformed: 'api_key_malformed',
@@ -24,7 +28,7 @@ const HTTP_STATUS: Record<ApiKeyErrorCode, number> = {
   api_key_ip_not_allowed: 403,
 };
 
-export class ApiKeyError extends HttpException {
+export class ApiKeyError extends HttpExceptionBase {
   readonly code: ApiKeyErrorCode;
   /**
    * Backward-compatible status property. Prefer Nest's getStatus() for new code.

@@ -1,10 +1,10 @@
-import { DynamicModule, Module, Provider } from '@nestjs/common';
+import { Module } from '@nestjs/common';
+import type { DynamicModule, Provider } from '@nestjs/common' with {
+  'resolution-mode': 'import',
+};
 import { ApiKeysGuard } from './api-keys.guard';
 import { ApiKeysService, ApiKeysServiceDeps } from './api-keys.service';
-import {
-  API_KEY_CONTEXT_WRITER,
-  ApiKeyContextWriter,
-} from './context';
+import { API_KEY_CONTEXT_WRITER, ApiKeyContextWriter } from './context';
 import { Sha256Hasher } from './hasher';
 import {
   API_KEY_CLIENT_IP_RESOLVER,
@@ -105,7 +105,9 @@ function resolveCurrentPepperVersion(options: ApiKeysModuleOptions): number {
 
   const currentPepperVersion = options.currentPepperVersion ?? Math.max(...configuredVersions);
   if (!options.peppers[currentPepperVersion]) {
-    throw new Error(`ApiKeysModule current pepper version ${currentPepperVersion} is not configured`);
+    throw new Error(
+      `ApiKeysModule current pepper version ${currentPepperVersion} is not configured`,
+    );
   }
 
   return currentPepperVersion;

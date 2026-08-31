@@ -8,7 +8,7 @@ const { resolveConsumerCandidate } = require('./package-candidate');
 const projectRoot = path.resolve(__dirname, '..');
 const DEFAULT_NEST_VERSION = '11.2.3';
 const DEFAULT_PRISMA_VERSION = '7.10.0';
-const EXPECTED_NEST_PEER = '^10.0.0 || ^11.0.0';
+const EXPECTED_NEST_PEER = '^10.0.0 || ^11.0.0 || ^12.0.0';
 const EXPECTED_PRISMA_PEER = '^5.0.0 || ^6.0.0 || ^7.0.0';
 const EXPECTED_NODE_ENGINE = '^22.13.0 || ^24.0.0';
 
@@ -205,6 +205,8 @@ function writeTypeScriptConsumer(consumerDir) {
   fs.writeFileSync(
     path.join(consumerDir, 'typecheck.ts'),
     `import {
+  ApiKeyError,
+  ApiKeyErrorCode,
   ApiKeysModule,
   ApiKeysService,
   InMemoryApiKeyStorage,
@@ -216,7 +218,7 @@ function writeTypeScriptConsumer(consumerDir) {
   type ApiKeySummary,
   type PrismaLike,
 } from '@nestarc/api-keys';
-import type { DynamicModule } from '@nestjs/common';
+import type { DynamicModule, HttpException } from '@nestjs/common' with { 'resolution-mode': 'import' };
 
 const storage = new InMemoryApiKeyStorage();
 const apiKeysModule: DynamicModule = ApiKeysModule.forRoot({
@@ -224,6 +226,7 @@ const apiKeysModule: DynamicModule = ApiKeysModule.forRoot({
   peppers: { 1: 'type-consumer-pepper' },
   storage,
 });
+const apiKeyError: HttpException = new ApiKeyError(ApiKeyErrorCode.Missing);
 const prismaStorage = new PrismaApiKeyStorage({} as PrismaLike);
 
 async function verifyPublicTypes(service: ApiKeysService): Promise<ApiKeyContext> {
@@ -263,6 +266,7 @@ async function verifyRequestAuthorizationTypes(
 }
 
 void apiKeysModule;
+void apiKeyError.getStatus();
 void prismaStorage;
 void verifyPublicTypes;
 void verifyTenantBoundManagementTypes;
@@ -387,10 +391,10 @@ function main() {
       throw new Error('Consumer lock integrity does not match npm pack output');
     }
     if (packedPackage.peerDependencies['@nestjs/common'] !== EXPECTED_NEST_PEER) {
-      throw new Error('Packed peer metadata does not declare the verified Nest 10/11 range');
+      throw new Error('Packed peer metadata does not declare the verified Nest 10/11/12 range');
     }
     if (packedPackage.peerDependencies['@nestjs/core'] !== EXPECTED_NEST_PEER) {
-      throw new Error('Packed peer metadata does not declare the verified Nest 10/11 range');
+      throw new Error('Packed peer metadata does not declare the verified Nest 10/11/12 range');
     }
     if (packedPackage.peerDependencies['@prisma/client'] !== EXPECTED_PRISMA_PEER) {
       throw new Error('Packed peer metadata does not declare the verified Prisma 5/6/7 range');

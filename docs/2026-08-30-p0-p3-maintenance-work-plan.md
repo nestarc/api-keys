@@ -120,7 +120,7 @@ M  docs/prisma-peer-compatibility-plan-2026-08-23.md
 | 축 | 공개 선언 | 현재 자동 증거 | 남은 결정 |
 | --- | --- | --- | --- |
 | Node | `^22.13.0 || ^24.0.0` | source exact Node 22.13.0/Node 24, DB·consumer Node 22.13.0, publish Node 24 | Node 26 등 새 major는 명시적 matrix 검증 뒤 추가 |
-| NestJS | 10/11 | Nest 11.2.3 full source suite+strict/HTTP, Nest 10.4.20 strict/HTTP; Nest 12.0.1 Node 24 HTTP runtime PASS, strict declaration FAIL | Nest 12는 `AK-M24` declaration/package 결정과 full matrix 뒤 추가 |
+| NestJS | 10/11/12 | Nest 11.2.3 full source suite+strict/HTTP, Nest 10.4.20 strict/HTTP; Nest 12.0.1 strict/HTTP Node 22.13.0/24 | 새 major는 exact strict declaration/DI/HTTP evidence 뒤 추가 |
 | Prisma | 5/6/7 optional | 각 major PostgreSQL 16 contract, 6/7 대표 strict consumers, no-Prisma root consumer | 결합 변경/실패 때만 targeted off-diagonal 추가 |
 | PostgreSQL | 14+ | Prisma 5 + PostgreSQL 14 boundary, Prisma 5/6/7 + PostgreSQL 16 current | 새 하한/상한은 real DB evidence 뒤 변경 |
 | module format | CommonJS runtime + explicit root/asset `exports` | CJS, native ESM, NodeNext, no-Prisma packed consumer | 별도 ESM build는 실제 최적화/consumer 요구 전까지 도입하지 않음 |
@@ -141,6 +141,8 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
   대표 diagonal compatibility evidence policy
 - `AK-M21`의 explicit package `exports`, shared CommonJS/native ESM runtime identity,
   NodeNext/no-Prisma packed consumer와 exact Prisma example subpath 계약
+- `AK-M24`의 Nest 12 ESM declaration bridge, exact Node 22.13.0/24 strict/HTTP matrix,
+  Nest 10/11/12 peer 계약
 - tenancy `TEN-M21`은 `DONE`이며 다시 열지 않는다. 역사적 published-only full-flow는 tenancy 0.15.0, API Keys 0.3.2, RBAC 0.2.1, Nest 11.2.1, Prisma 7.10.0 tuple과 legacy lane을 검증했다.
 - 이후 published `@nestarc/tenancy@0.16.0`의 별도 modern lane은 API Keys 0.3.2, RBAC 0.2.1, Outbox 0.2.1, Jobs 0.3.1, Webhook 0.13.1, Nest 11.2.1, Prisma 7.10.0을 registry lock/integrity와 함께 다시 검증했고 legacy/modern 실경로가 각각 3/3 통과했다.
 - 이후 API Keys/RBAC patch의 published-only 재검증은 새 tenancy 외부 작업 `TEN-ECO-NEXT`가 소유한다. `TEN-M21`을 재개하거나 API Keys 작업의 `DONE`을 이 사후 검증에 종속시키지 않는다.
@@ -181,7 +183,7 @@ Node 20의 EOL 상태는 [Node.js 공식 release 표](https://nodejs.org/en/abou
 | 20 | `AK-M21` | P3 | `DONE` | M | `AK-M10` | `exports`/ESM packaging ADR |
 | 21 | `AK-M22` | P3 | `DONE` | S | `AK-M02` | collision retry terminal error 계약 |
 | 22 | `AK-M23` | P3 | `DONE` | S | `AK-M10` | Nest 12 stable strict-consumer 호환성 스파이크 |
-| 23 | `AK-M24` | P3 | `DECISION` | M | `AK-M23` | Nest 12 ESM declaration/package 호환성 결정·구현 |
+| 23 | `AK-M24` | P3 | `DONE` | M | `AK-M23` | Nest 12 ESM declaration/package 호환성 결정·구현 |
 
 P0는 `AK-M01`과 `AK-M02`를 서로 다른 PR로 진행한다. 어느 하나의 완료가 다른 하나를 대체하지 않는다.
 
@@ -948,7 +950,7 @@ declaration 오류는 유지됐다. 따라서 지원표와 peer 범위는 Nest 1
 
 ### `AK-M24` — Nest 12 ESM declaration/package compatibility
 
-- 상태: `P3 / DECISION (AK-M23 DONE)`
+- 상태: `P3 / DONE`
 - CommonJS canonical runtime을 유지하는 declaration bridge, conditional declarations/output, package
   ESM migration을 비교하고 Nest 10/11 compatibility와 loader identity 영향을 먼저 결정한다.
 - 선택한 전략으로 exact Nest 12.0.1 strict install/type/runtime와 HTTP Guard를 Node 22.13.0/24에서
@@ -957,11 +959,21 @@ declaration 오류는 유지됐다. 따라서 지원표와 peer 범위는 Nest 1
 
 완료 조건:
 
-- [ ] `AK-M23`의 `TS1479`/`TS1542`를 permanent RED fixture로 고정한다.
-- [ ] declaration/package 전략과 pre-1.0 versioning/migration 영향을 ADR로 결정한다.
-- [ ] Nest 10.4.20/11.2.3 기존 CommonJS/native ESM/NodeNext/no-Prisma 계약을 보존한다.
-- [ ] Nest 12.0.1 exact strict declaration, DI/runtime, HTTP Guard가 Node 22.13.0/24에서 통과한다.
-- [ ] peer metadata, README/CHANGELOG, CI/release matrix를 같은 변경으로 갱신한다.
+- [x] `AK-M23`의 `TS1479`/`TS1542`를 permanent RED fixture로 고정한다.
+- [x] declaration/package 전략과 pre-1.0 versioning/migration 영향을 ADR로 결정한다.
+- [x] Nest 10.4.20/11.2.3 기존 CommonJS/native ESM/NodeNext/no-Prisma 계약을 보존한다.
+- [x] Nest 12.0.1 exact strict declaration, DI/runtime, HTTP Guard가 Node 22.13.0/24에서 통과한다.
+- [x] peer metadata, README/CHANGELOG, CI/release matrix를 같은 변경으로 갱신한다.
+
+완료 결정(2026-08-31): `AK-M21`의 canonical CommonJS runtime과 shared loader identity를 유지하고,
+공개 Nest type reference만 TypeScript `resolution-mode: "import"`로 해석하는 단일 declaration bridge를
+채택했다. permanent Nest 12 lane은 bridge 전 `TS1479` 4건/`TS1542` 2건을 재현했고 bridge 후 exact
+Nest 12.0.1/Prisma 7.10.0 strict install, `skipLibCheck: false` declaration, DI runtime과 HTTP 10-case를
+Node 22.13.0/24에서 통과했다. Nest peer는 `^10.0.0 || ^11.0.0 || ^12.0.0`으로 확대했다.
+declaration syntax floor는 TypeScript 5.3이며 planned pre-1.0 `0.4.0` migration으로 기록했다. 근거와
+대안 비교는
+[`2026-08-31-nest-12-declaration-compatibility-adr.md`](./2026-08-31-nest-12-declaration-compatibility-adr.md)에
+있다.
 
 ### 결정 대기 후보
 
@@ -1020,10 +1032,15 @@ matrix 증거가 caller-provided database로 바뀌지 않도록 `PRISMA_E2E_DAT
 npm run test:e2e:postgres-matrix
 npm run test:consumer:strict:legacy
 npm run test:consumer:strict:modern
+npm run test:consumer:strict:nest12
 npm run test:consumer:no-prisma
 npm run test:consumer:http:nest10
 npm run test:consumer:http:nest11
+npm run test:consumer:http:nest12
 ```
+
+Nest 12 strict/HTTP commands는 exact Node 22.13.0과 Node 24 모두에서 실행한다. CI와 release의 전용
+matrix가 두 Node lane에서 같은 release candidate command를 반복한다.
 
 `test:e2e:postgres-matrix`는 PostgreSQL 14 boundary와 16 current lane을 구분해 보고해야 한다. 기존 strict consumers는 application context만 boot하므로 `AK-M01`의 HTTP/Guard/exception-filter 증거 또는 `AK-M10`의 no-Prisma 증거로 세지 않는다.
 
@@ -1113,6 +1130,7 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 - [x] `AK-M18`: main ancestry와 consumer-verified exact tarball identity
 - [x] `AK-M20B`: public storage contract 또는 corrected documentation packed test
 - [x] `AK-M22`: create/rotate 3-attempt terminal collision error/cause와 operation metric contract
+- [x] `AK-M24`: Nest 12 exact Node 22.13.0/24 strict declaration/DI와 HTTP 10-case contract
 
 `TEN-ECO-NEXT`의 published-only evidence는 tenancy-owned external gate다. API Keys release에서는 `AK-M06B`의 packed pre-publish consumer를 지속 gate로 유지해 순환을 만들지 않는다. 향후 gate를 완료 전 P0 patch의 선행 조건으로 소급 적용하지 않는다.
 
@@ -1127,9 +1145,8 @@ Tenancy ecosystem: published package tuple의 end-to-end 경로 검증
 4. profile A/B/D와 packed RBAC consumer를 다시 통과시켜 `AK-M06B`를 `DONE` 처리하고,
    tenancy-owned `TEN-ECO-NEXT`에 published package tuple을 인계한다.
 5. `AK-M07A/B`, `AK-M14`, `AK-M08A/B/C`, `AK-M09`, `AK-M10`, `AK-M11/12/13/15/16`,
-   `AK-M17A/B`, `AK-M18/19`, `AK-M20A/B`, `AK-M21/22/23`은 완료됐다. 외부 RBAC release를
-   기다리는 동안 다음 로컬 작업은 `AK-M24`의 Nest 12 declaration/package 전략 결정이며
-   `AK-M06B` 완료와는 독립이다.
+   `AK-M17A/B`, `AK-M18/19`, `AK-M20A/B`, `AK-M21/22/23/24`는 완료됐다. 현재 실행 큐에
+   `AK-M06B` 외의 미완료 local task는 없으며, 새 결정 후보는 별도 합의 전 시작하지 않는다.
 
 Published RBAC 0.2.1은 `request.apiKeyContext` conflict와 trim/coerce 계약 때문에 의도적으로
 RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증거로 사용하지 않는다.
@@ -1168,6 +1185,7 @@ RED다. sibling checkout 또는 unpublished RBAC tarball을 `AK-M06B` 완료 증
 | 2026-08-31 | `AK-M20B` | `DONE` | `5ff983d` | `5ff983d + worktree` (PR/release 없음) | RED missing root export, public runner 9 checks, packed no-Prisma custom adapter compile/runtime, 13 suites/208 tests, coverage 90.46/84.42/89.79/90.18, 50-file allowlist PASS | AK-M20A/B 변경 검토·commit 뒤 `AK-M21` packaging ADR |
 | 2026-08-31 | `AK-M22` | `DONE` | `db2ce10` | `db2ce10 + worktree` (PR/release 없음) | RED create/rotate raw terminal Error 2건, 3-attempt typed cause/metric contract, 13 suites/212 tests, coverage 90.63/84.49/90.06/90.36, no-Prisma와 CJS/ESM packed consumers PASS | AK-M22 변경 검토·commit 뒤 `AK-M23` Nest 12 evidence spike |
 | 2026-08-31 | `AK-M23` | `DONE` | `bd0d793` | `bd0d793 + worktree` (PR/release 없음) | 현재 peer strict install ERESOLVE; 임시 peer 완화 exact install PASS, declaration TS1479/TS1542 FAIL, Node 24 HTTP Guard 10 cases PASS, ESM consumer 변형도 declaration FAIL | `AK-M24`에서 declaration/package 전략 결정 뒤 Node 22.13.0/24 full matrix |
+| 2026-08-31 | `AK-M24` | `DONE` | `9cfcd76` | `9cfcd76 + worktree` (PR/release 없음) | permanent RED TS1479 4/TS1542 2; 0.4.0 final candidate Node 22.13.0/24 Nest 12 strict+HTTP PASS, Nest 10/11/no-Prisma/CJS-ESM PASS, 13 suites/212 tests, coverage 90.64/84.49/90.06/90.37, PostgreSQL matrix 각 30, audits 0 | AK-M24와 0.4.0 bump 변경 검토·release commit; 다음 local READY 없음 |
 
 ### AK-M01 종료 인계
 
@@ -2219,4 +2237,49 @@ Unverified paths and reason: Nest 12 Node 22.13.0 runtime과 source/DB/coverage 
 External PR/release evidence: 새 PR/release 없음. npm registry의 exact Nest 12.0.1 metadata만 조회했다.
 Next exact action: AK-M24에서 TS1479/TS1542 fixture를 permanent RED로 고정하고 CommonJS declaration
   bridge, conditional declarations/output, ESM migration 중 전략과 versioning을 결정한다.
+```
+
+### AK-M24 종료 인계
+
+```text
+Task: AK-M24
+State: DONE
+Start ref / end ref: 9cfcd76 / 9cfcd76 + session worktree (commit·PR·release 없음)
+Changed files: package.json, package-lock.json, src/api-keys.guard.ts, src/api-keys.module.ts,
+  src/errors.ts, src/decorators/require-environment.decorator.ts,
+  src/decorators/require-scope.decorator.ts, scripts/test-strict-consumer.js,
+  scripts/test-no-prisma-consumer.js, scripts/test-release-workflow.js, .github/workflows/ci.yml,
+  .github/workflows/release.yml, README.md, CHANGELOG.md,
+  docs/2026-08-30-compatibility-evidence-policy.md,
+  docs/2026-08-31-nest-12-declaration-compatibility-adr.md,
+  docs/2026-08-30-p0-p3-maintenance-work-plan.md
+Contract decision: AK-M21의 canonical CommonJS runtime과 shared require/import identity를 유지하고
+  public Nest type만 resolution-mode import로 해석하는 단일 declaration bridge를 사용한다. Nest peer는
+  ^10.0.0 || ^11.0.0 || ^12.0.0으로 확대하며 TypeScript declaration parser floor 5.3은 planned
+  pre-1.0 0.4.0 migration으로 기록한다. conditional output과 package-wide ESM migration은 거부한다.
+Commands and exact results:
+  permanent npm run test:consumer:strict:nest12 RED => exact Nest 12.0.1/Prisma 7.10.0 install;
+    packed declarations TS1479 4건, TS1542 2건, exit 2
+  final candidate nestarc-api-keys-0.4.0.tgz =>
+    sha256 2fc1cf8e61e91d5861f9a94e551942c83ef1c2a816ffb292886c2ffba27be53b,
+    verify candidate PASS, 50-file allowlist
+  final candidate Node 22.13.0 and Node 24.11.1 => exact Nest 12.0.1/Prisma 7.10.0 strict
+    install, skipLibCheck false declaration, application-context runtime PASS on both;
+    exact Nest 12.0.1 HTTP default-filter 10-case PASS on both
+  same candidate Nest 10.4.20/Prisma 6.19.3 and Nest 11.2.3/Prisma 7.10.0 strict PASS;
+    Nest 10.4.20/11.2.3 HTTP, no-Prisma, CommonJS/native ESM/NodeNext, public storage contract PASS
+  npm run lint -- --no-cache; tsc --noEmit -p tsconfig.build.json => PASS
+  npm test -- --runInBand => 13 suites, 212 tests PASS
+  fresh coverage => statements 90.64%, branches 84.49%, functions 90.06%, lines 90.37%;
+    global/critical floors PASS
+  npm run test:e2e:postgres-matrix => PostgreSQL 14/Prisma 5 and PostgreSQL 16/Prisma 5/6/7,
+    각 30 tests PASS
+  build, release source/candidate/workflow/audit-policy fixtures, pack dry-run 50 entries,
+    benchmark smoke, production/full npm audit 0, ADR/doc formatting, git diff --check => PASS
+Unverified paths and reason: remote CI, tag release, npm publish는 commit/push 전이라 실행하지 않았다.
+  RBAC published prerequisite와 AK-M06B는 이 작업 범위 밖이며 상태를 변경하지 않았다.
+External PR/release evidence: 새 PR/release/publish 없음. exact Nest/Prisma packages는 strict npm
+  install로 조회·검증했고 release workflow가 final candidate 재사용을 강제한다.
+Next exact action: AK-M24와 0.4.0 version bump 변경만 검토해 release commit한다. 현재 실행 큐에
+  새 local READY는 없으며 AK-M06B는 RBAC-M01/M02 포함 published release를 기다린다.
 ```

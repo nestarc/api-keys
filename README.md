@@ -34,16 +34,19 @@ tested minimum and Node 24 is the current source and release runtime. Node 20 is
 starting with the planned `0.4.0` release; upgrade the application runtime before upgrading this
 package. Newer unlisted Node majors are not supported until they are added to the tested matrix.
 
-NestJS 10 and 11 are supported. `@prisma/client` is an optional peer dependency: the Prisma
+NestJS 10, 11, and 12 are supported. `@prisma/client` is an optional peer dependency: the Prisma
 storage adapter is verified with Prisma 5.22.0, 6.19.3, and 7.10.0 against PostgreSQL and
 declares support for `^5.0.0 || ^6.0.0 || ^7.0.0`. Consumers that use the in-memory adapter or
 a custom storage adapter do not need to install Prisma. Prisma 7 consumers must also satisfy
-Prisma's Node.js requirement and configure the driver adapter for their database.
+Prisma's Node.js requirement and configure the driver adapter for their database. TypeScript
+consumers need TypeScript 5.3 or newer to parse the Nest ESM declaration bridge; the strict matrix
+uses exact TypeScript 5.9.3.
 
 | Supported boundary | Persistent evidence                                                                           |
 | ------------------ | --------------------------------------------------------------------------------------------- |
 | NestJS 10          | Exact 10.4.20 packed strict install/typecheck/runtime and default HTTP Guard pipeline         |
 | NestJS 11          | Full source suite plus exact 11.2.3 packed strict and HTTP consumers                          |
+| NestJS 12          | Exact 12.0.1 strict and HTTP consumers on Node 22.13.0 and Node 24                            |
 | Prisma 5/6/7       | Exact 5.22.0, 6.19.3, and 7.10.0 generated-client storage contracts on PostgreSQL 16          |
 | PostgreSQL 14+     | Prisma 5.22.0 storage contract on PostgreSQL 14; all Prisma majors on PostgreSQL 16           |
 | Prisma omitted     | Independent NestJS 11.2.3 packed root consumer with no Prisma install or lock entry           |
@@ -51,7 +54,8 @@ Prisma's Node.js requirement and configure the driver adapter for their database
 
 The project tests integration boundaries rather than every NestJS/Prisma/PostgreSQL Cartesian
 combination. The legacy NestJS 10 + Prisma 6 and modern NestJS 11 + Prisma 7 packed lanes are the
-representative diagonals; Prisma storage is independently tested against a real database. See the
+representative diagonals; the NestJS 12 + Prisma 7 lane additionally protects the ESM declaration
+boundary on both supported Node versions. Prisma storage is independently tested against a real database. See the
 [compatibility evidence policy](docs/2026-08-30-compatibility-evidence-policy.md) for lane ownership,
 off-diagonal criteria, and the exact reproducible commands.
 
@@ -61,6 +65,8 @@ not split across formats. Internal `dist/**` paths are not public. The three pac
 schema/config examples and `package.json` remain available through exact package subpaths. See the
 [package exports and ESM ADR](docs/2026-08-31-package-exports-esm-adr.md) for the complete boundary
 and the `0.4.0` deep-import migration note.
+Nest 12's declaration bridge and the TypeScript 5.3 parser migration are recorded in the
+[Nest 12 declaration compatibility ADR](docs/2026-08-31-nest-12-declaration-compatibility-adr.md).
 
 Maintenance work is prioritized in the
 [canonical P0–P3 execution queue](docs/2026-08-30-p0-p3-maintenance-work-plan.md). Versioned PRDs,
@@ -679,7 +685,8 @@ combination, `npm run test:e2e:prisma` still accepts `PRISMA_E2E_RUNTIME_ROOT` a
 
 `npm run test:consumer:strict:legacy` packs the library and verifies exact Nest 10.4.20 with
 Prisma 6.19.3. `npm run test:consumer:strict:modern` verifies exact Nest 11.2.3 with Prisma
-7.10.0. Both use an independent strict install, assert installed versions and packed peer
+7.10.0. `npm run test:consumer:strict:nest12` verifies exact Nest 12.0.1 with Prisma 7.10.0 and
+the ESM declaration bridge. All use an independent strict install, assert installed versions and packed peer
 metadata, compile the packed public declarations with `skipLibCheck: false`, and boot a Nest
 application context. They reject inherited npm bypass settings and explicitly keep
 `--legacy-peer-deps` and `--force` disabled.
@@ -691,8 +698,10 @@ public declarations with `skipLibCheck: false`, imports the package root, and bo
 adapter path. This is the persistent evidence for the optional Prisma peer; the legacy and modern
 strict consumers both install Prisma and do not count for that claim.
 
-`npm run test:consumer:http:nest10` and `npm run test:consumer:http:nest11` pack the library and
-exercise the default Nest HTTP exception pipeline with the exact supported Nest versions. They
+`npm run test:consumer:http:nest10`, `npm run test:consumer:http:nest11`, and
+`npm run test:consumer:http:nest12` pack the library and exercise the default Nest HTTP exception
+pipeline with the exact supported Nest versions. The Nest 12 strict and HTTP commands run on both
+Node 22.13.0 and Node 24 in CI and release. They
 verify the 401/403 status matrix and the safe public error body without installing a custom filter.
 Consumer commands pack a local candidate by default. The release workflow instead sets
 `API_KEYS_PACKAGE_CANDIDATE_DIR`, causing every packed and HTTP consumer to verify and install the
