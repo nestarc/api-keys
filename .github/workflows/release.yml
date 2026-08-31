@@ -92,7 +92,7 @@ jobs:
     timeout-minutes: 25
     needs: prepare-release
     env:
-      API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
+      API_KEYS_PACKAGE_CANDIDATE_DIR: /tmp/api-keys-release-candidate
     strategy:
       fail-fast: false
       matrix:
@@ -140,7 +140,7 @@ jobs:
     timeout-minutes: 30
     needs: prepare-release
     env:
-      API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
+      API_KEYS_PACKAGE_CANDIDATE_DIR: /tmp/api-keys-release-candidate
     strategy:
       fail-fast: false
       matrix:
@@ -170,7 +170,7 @@ jobs:
     timeout-minutes: 25
     needs: prepare-release
     env:
-      API_KEYS_PACKAGE_CANDIDATE_DIR: ${{ runner.temp }}/api-keys-release-candidate
+      API_KEYS_PACKAGE_CANDIDATE_DIR: /tmp/api-keys-release-candidate
     strategy:
       fail-fast: false
       matrix:
