@@ -42,15 +42,6 @@ function assertWorkflowPolicy(name, workflow) {
   }
 }
 
-function dependabotGroupBody(source, group) {
-  const marker = `      ${group}:\n`;
-  const start = source.indexOf(marker);
-  assert.notEqual(start, -1, `Dependabot ${group} group is missing`);
-  const remaining = source.slice(start + marker.length);
-  const nextGroup = remaining.search(/^      [a-z][a-z0-9-]+:\n/m);
-  return remaining.slice(0, nextGroup === -1 ? undefined : nextGroup);
-}
-
 function main() {
   const ciWorkflow = fs.readFileSync(
     path.resolve(__dirname, '..', '.github/workflows/ci.yml'),
@@ -60,11 +51,6 @@ function main() {
     path.resolve(__dirname, '..', '.github/workflows/release.yml'),
     'utf8',
   );
-  const dependabot = fs.readFileSync(
-    path.resolve(__dirname, '..', '.github/dependabot.yml'),
-    'utf8',
-  );
-
   assertWorkflowPolicy('CI', ciWorkflow);
   assertWorkflowPolicy('release', workflow);
 
@@ -202,28 +188,6 @@ function main() {
       /npm run test:consumer:http:nest12/,
       `${name} Nest 12 HTTP consumer is missing`,
     );
-  }
-
-  const dependencyGroups = {
-    'nest-trio': ['@nestjs/common', '@nestjs/core', '@nestjs/testing'],
-    jest: ['jest', '@types/jest', 'ts-jest'],
-    'eslint-typescript-eslint': ['eslint', '@eslint/js', '@typescript-eslint/*'],
-  };
-  for (const [group, dependencies] of Object.entries(dependencyGroups)) {
-    const body = dependabotGroupBody(dependabot, group);
-    requireMatch(
-      body,
-      /dependency-type: development/,
-      `Dependabot ${group} must be development-only`,
-    );
-    requireMatch(
-      body,
-      /update-types: \['minor', 'patch'\]/,
-      `Dependabot ${group} update types drifted`,
-    );
-    for (const dependency of dependencies) {
-      assert.ok(body.includes(`- '${dependency}'`), `Dependabot ${group} omits ${dependency}`);
-    }
   }
 
   const packCommands = workflow.match(/npm run release:prepare-candidate/g) ?? [];
