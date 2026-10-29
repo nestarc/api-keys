@@ -1,4 +1,11 @@
 {
   "schemaVersion": 1,
-  "exceptions": []
+  "exceptions": [
+    {
+      "id": "GHSA-GCQX-W48M-W2H4",
+      "package": "deepmerge",
+      "expires": "2026-11-28",
+      "reason": "Low-severity prototype poisoning in deepmerge 4.3.1 is confined to Jest's development-only configuration merging. This repository uses checked-in Jest/ts-jest configurations and does not pass application request data to those merges. Production audit is clean. No patched deepmerge release is available as of 2026-10-29; remove this exception when an upstream fix is available and review before expiry. Advisory: https://github.com/advisories/GHSA-gcqx-w48m-w2h4"
+    }
+  ]
 }

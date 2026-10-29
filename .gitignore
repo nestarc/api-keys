@@ -1,6 +1,9 @@
 # macOS metadata
 .DS_Store
 
+# Local project documentation
+/docs/
+
 # Logs
 logs
 *.log

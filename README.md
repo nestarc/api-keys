@@ -56,22 +56,20 @@ The project tests integration boundaries rather than every NestJS/Prisma/Postgre
 combination. The legacy NestJS 10 + Prisma 6 and modern NestJS 11 + Prisma 7 packed lanes are the
 representative diagonals; the NestJS 12 + Prisma 7 lane additionally protects the ESM declaration
 boundary on both supported Node versions. Prisma storage is independently tested against a real database. See the
-[compatibility evidence policy](docs/2026-08-30-compatibility-evidence-policy.md) for lane ownership,
+[compatibility evidence policy](https://github.com/nestarc/api-keys/blob/c7a7cd4ea07b26bee029c078aaca83d9af32a54e/docs/2026-08-30-compatibility-evidence-policy.md) for lane ownership,
 off-diagonal criteria, and the exact reproducible commands.
 
 Import runtime and type APIs from the package root. The package uses one CommonJS runtime for both
 `require('@nestarc/api-keys')` and native ESM `import` so class and Nest injection-token identity do
 not split across formats. Internal `dist/**` paths are not public. The three packaged Prisma
 schema/config examples and `package.json` remain available through exact package subpaths. See the
-[package exports and ESM ADR](docs/2026-08-31-package-exports-esm-adr.md) for the complete boundary
+[package exports and ESM ADR](https://github.com/nestarc/api-keys/blob/c7a7cd4ea07b26bee029c078aaca83d9af32a54e/docs/2026-08-31-package-exports-esm-adr.md) for the complete boundary
 and the `0.4.0` deep-import migration note.
 Nest 12's declaration bridge and the TypeScript 5.3 parser migration are recorded in the
-[Nest 12 declaration compatibility ADR](docs/2026-08-31-nest-12-declaration-compatibility-adr.md).
+[Nest 12 declaration compatibility ADR](https://github.com/nestarc/api-keys/blob/c7a7cd4ea07b26bee029c078aaca83d9af32a54e/docs/2026-08-31-nest-12-declaration-compatibility-adr.md).
 
-Maintenance work is prioritized in the
-[canonical P0–P3 execution queue](docs/2026-08-30-p0-p3-maintenance-work-plan.md). Versioned PRDs,
-technical specs, and implementation plans describe completed historical releases and are not a
-second backlog.
+Maintenance plans, PRDs, and technical specs are kept locally in the ignored `docs/` directory.
+The document links in this README point to the last tracked snapshots for historical reference.
 
 ## Quickstart
 
@@ -157,7 +155,7 @@ validator in your application before calling this package if your system require
 Invalid runtime input fails with `ApiKeyOperationError` code `api_key_invalid_input` before key
 generation or storage access. A custom storage adapter that returns a non-canonical tenant is not
 silently repaired: verification and management reads fail closed. See the
-[tenant identity ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-tenant-identity-contract-adr.md) for existing-data migration
+[tenant identity ADR](https://github.com/nestarc/api-keys/blob/c7a7cd4ea07b26bee029c078aaca83d9af32a54e/docs/2026-08-30-tenant-identity-contract-adr.md) for existing-data migration
 and cross-package ownership.
 
 ## Key format
@@ -566,7 +564,7 @@ The payload is `{ type: 'api_key.operation', operation: 'create' | 'rotate',
 outcome: 'prefix_collision_exhausted', attempts: 3 }`. Sink failures are isolated and can be
 observed through `onOperationMetricError`.
 
-See the [request authorization telemetry ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-request-authorization-telemetry-adr.md)
+See the [request authorization telemetry ADR](https://github.com/nestarc/api-keys/blob/c7a7cd4ea07b26bee029c078aaca83d9af32a54e/docs/2026-08-30-request-authorization-telemetry-adr.md)
 for the full missing/credential/denial matrix and compatibility decision.
 
 ## RBAC integration
@@ -661,14 +659,16 @@ request(app).get('/reports').set('Authorization', `Bearer ${fixture.key}`);
 
 ## Docs
 
-- [`docs/prd.md`](docs/prd.md) Product requirements
-- [`docs/spec.md`](docs/spec.md) Technical spec
-- [`docs/spec-0.2.md`](docs/spec-0.2.md) v0.2 technical spec
-- [`docs/spec-0.3.md`](docs/spec-0.3.md) v0.3 technical spec
-- [Tenant identity and management boundary ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-tenant-identity-contract-adr.md)
-- [Request authorization telemetry ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-request-authorization-telemetry-adr.md)
-- [Node.js support policy ADR](https://github.com/nestarc/api-keys/blob/main/docs/2026-08-30-node-support-policy-adr.md)
-- [Compatibility evidence policy](docs/2026-08-30-compatibility-evidence-policy.md)
+These document snapshots are archived in Git history; `docs/` is no longer tracked.
+
+- [`docs/prd.md`](https://github.com/nestarc/api-keys/blob/c7a7cd4ea07b26bee029c078aaca83d9af32a54e/docs/prd.md) Product requirements
+- [`docs/spec.md`](https://github.com/nestarc/api-keys/blob/c7a7cd4ea07b26bee029c078aaca83d9af32a54e/docs/spec.md) Technical spec
+- [`docs/spec-0.2.md`](https://github.com/nestarc/api-keys/blob/c7a7cd4ea07b26bee029c078aaca83d9af32a54e/docs/spec-0.2.md) v0.2 technical spec
+- [`docs/spec-0.3.md`](https://github.com/nestarc/api-keys/blob/c7a7cd4ea07b26bee029c078aaca83d9af32a54e/docs/spec-0.3.md) v0.3 technical spec
+- [Tenant identity and management boundary ADR](https://github.com/nestarc/api-keys/blob/c7a7cd4ea07b26bee029c078aaca83d9af32a54e/docs/2026-08-30-tenant-identity-contract-adr.md)
+- [Request authorization telemetry ADR](https://github.com/nestarc/api-keys/blob/c7a7cd4ea07b26bee029c078aaca83d9af32a54e/docs/2026-08-30-request-authorization-telemetry-adr.md)
+- [Node.js support policy ADR](https://github.com/nestarc/api-keys/blob/c7a7cd4ea07b26bee029c078aaca83d9af32a54e/docs/2026-08-30-node-support-policy-adr.md)
+- [Compatibility evidence policy](https://github.com/nestarc/api-keys/blob/c7a7cd4ea07b26bee029c078aaca83d9af32a54e/docs/2026-08-30-compatibility-evidence-policy.md)
 - [`CHANGELOG.md`](CHANGELOG.md) Release history
 
 ## Contributing
