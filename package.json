@@ -52,7 +52,8 @@
     "test:release:source": "node scripts/test-release-source.js",
     "test:release:workflow": "node scripts/test-release-workflow.js",
     "test:audit-policy": "node scripts/test-audit-policy.js",
-    "audit:ci": "node scripts/audit-policy.js",
+    "test:deepmerge": "node scripts/test-deepmerge.js",
+    "audit:ci": "npm run test:deepmerge && node scripts/audit-policy.js",
     "release:prepare-candidate": "node scripts/package-candidate.js create --directory",
     "release:verify-candidate": "node scripts/package-candidate.js verify --directory",
     "release:verify-source": "node scripts/verify-release-source.js",
@@ -85,6 +86,7 @@
     "@types/node": "^22.13.0",
     "@typescript-eslint/eslint-plugin": "^8.68.0",
     "@typescript-eslint/parser": "^8.68.0",
+    "deepmerge": "file:vendor/deepmerge",
     "eslint": "^10.9.1",
     "globals": "^17.11.0",
     "jest": "^30.4.2",
@@ -95,6 +97,11 @@
     "ts-jest": "^29.1.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.0"
+  },
+  "overrides": {
+    "jest-config": {
+      "deepmerge": "$deepmerge"
+    }
   },
   "dependencies": {
     "ipaddr.js": "^2.2.0"
